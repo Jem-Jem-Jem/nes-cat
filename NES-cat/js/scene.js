@@ -79,11 +79,29 @@
     WALK_MIN_X: 18,
     WALK_MAX_X: 268,
 
+    /* Where the interactive furniture lives. Shiro walks to these, so they
+     * are the single source of truth for both drawing and behaviour — change
+     * a bowl here and she turns up at the new spot automatically. */
+    BOWL_WATER_X: 46,
+    BOWL_FOOD_X: 66,
+    CAT_TREE_X: 214,     /* she stands just left of the post */
+    YARN_MIN_X: 92,
+    YARN_MAX_X: 138,
+
     light: null,
     hour: 12,
     second: 0,
     time: 0,
     isNight: false,
+
+    /* How much is left in each bowl, 0..1. She only goes when there is
+     * something to eat, and eating visibly empties the bowl. */
+    food: 1,
+    water: 1,
+
+    /* Impulses other modules can poke, so the room reacts to Shiro. */
+    _toySwing: 0,
+    _toySwingV: 0,
 
     _motes: [],
     _stars: [],
@@ -96,6 +114,46 @@
     _yarnDur: 1,
     _yarnFrom: 104,
     _yarnTo: 118,
+
+    /* ---------- reactions to Shiro ---------------------------------------- */
+
+    /* Shiro swatted the hanging toy: kick it and let it damp out. */
+    pokeToy: function (power) {
+      this._toySwingV += (power == null ? 9 : power);
+    },
+
+    /* Shiro batted the yarn: send it rolling away from her. */
+    nudgeYarn: function (fromX, power) {
+      var dir = fromX == null ? 1 : (this._yarnX < fromX ? 1 : -1);
+      this._yarnDur = 1.4;
+      this._yarnAnim = this._yarnDur;
+      this._yarnFrom = this._yarnX;
+      this._yarnTo = U.clamp(this._yarnX + dir * (power == null ? 22 : power),
+                             this.YARN_MIN_X, this.YARN_MAX_X);
+      this._yarnGap = 9;
+      this._yarnPhase += 1.2;
+    },
+
+    /* A mouthful or a lap costs a slice of the bowl. */
+    takeFood: function () { this.food = Math.max(0, this.food - 0.34); return this.food; },
+    takeWater: function () { this.water = Math.max(0, this.water - 0.34); return this.water; },
+
+    /* Bowls slowly refill so she is never permanently locked out. */
+    updateBowls: function (dt) {
+      this.food = U.clamp(this.food + dt * 0.012, 0, 1);
+      this.water = U.clamp(this.water + dt * 0.016, 0, 1);
+    },
+
+    updateToy: function (dt) {
+      if (this._toySwing === 0 && this._toySwingV === 0) return;
+      /* damped spring back to rest */
+      this._toySwingV += -this._toySwing * 9 * dt;
+      this._toySwingV *= (1 - 2.2 * dt);
+      this._toySwing += this._toySwingV * dt;
+      if (Math.abs(this._toySwing) < 0.05 && Math.abs(this._toySwingV) < 0.05) {
+        this._toySwing = 0; this._toySwingV = 0;
+      }
+    },
 
     init: function () {
       var d = new Date();
@@ -149,6 +207,8 @@
       this.updateMotes(dt);
       this.updateBirds(dt);
       this.updateYarn(dt);
+      this.updateToy(dt);
+      this.updateBowls(dt);
     },
 
     updateMotes: function (dt) {
@@ -199,7 +259,7 @@
         this._yarnDur = U.rand(1.6, 2.8);
         this._yarnAnim = this._yarnDur;
         this._yarnFrom = this._yarnX;
-        this._yarnTo = U.clamp(this._yarnX + U.rand(-20, 20), 92, 138);
+        this._yarnTo = U.clamp(this._yarnX + U.rand(-20, 20), this.YARN_MIN_X, this.YARN_MAX_X);
         this._yarnGap = U.rand(6, 15);
       }
     },
@@ -705,21 +765,34 @@
     },
 
     drawBowls: function (g, L) {
-      /* water bowl */
-      var wx = 46, wy = 134;
+      /* Both bowls empty as Shiro uses them, so she is never eating a
+       * bowl that is visibly already empty. */
+      var lvl = U.clamp(this.water, 0, 1);
+      var wx = this.BOWL_WATER_X, wy = 134;
       disc(g, wx, wy, 8, 4, g.color(U.mixHex(L.floor, '#000000', 0.35)));
       disc(g, wx, wy - 1, 7, 3, g.color(amb(L, '#3aa0d8', 0.5)));
-      fillC(g, Math.sin(this.time * 3) > 0 ? '#bfe8ff' : '#7fc8f5');
-      g.rect(wx - 3 + (Math.sin(this.time * 3) > 0 ? 1 : 0), wy - 2, 3, 1);
+      if (lvl > 0.02) {
+        /* the surface sits lower as the bowl drains */
+        var sy = wy - 1 + Math.round((1 - lvl) * 2);
+        fillC(g, amb(L, '#7fc8f5', 0.45));
+        g.rect(wx - 5, sy, 10, 3);
+        fillC(g, Math.sin(this.time * 3) > 0 ? '#bfe8ff' : '#7fc8f5');
+        g.rect(wx - 3 + (Math.sin(this.time * 3) > 0 ? 1 : 0), sy, 3, 1);
+      }
 
       /* food bowl */
-      var fx = 66, fy = 137;
+      var flvl = U.clamp(this.food, 0, 1);
+      var fx = this.BOWL_FOOD_X, fy = 137;
       disc(g, fx, fy, 8, 4, g.color(U.mixHex(L.floor, '#000000', 0.35)));
       disc(g, fx, fy - 1, 7, 3, g.color(amb(L, '#e76e55', 0.5)));
-      fillC(g, amb(L, '#a9743f', 0.6));
-      g.rect(fx - 4, fy - 2, 2, 2);
-      g.rect(fx, fy - 3, 2, 2);
-      g.rect(fx + 3, fy - 1, 2, 2);
+      if (flvl > 0.02) {
+        fillC(g, amb(L, '#a9743f', 0.6));
+        g.rect(fx - 5, fy - 2, 10, 3);
+        fillC(g, amb(L, '#c98a4a', 0.6));
+        g.rect(fx - 4, fy - 3, 2, 2);
+        g.rect(fx, fy - 3, 2, 2);
+        g.rect(fx + 3, fy - 2, 2, 2);
+      }
     },
 
     /* ---------- cat tree ---------------------------------------------------- */
@@ -762,8 +835,8 @@
       fillC(g, amb(L, '#f3a08c', 0.6));
       g.rect(207, 60, 24, 1);
 
-      /* a toy swinging from the bed */
-      var swing = Math.sin(t * 1.7) * 5;
+      /* a toy swinging from the bed — Shiro batting it adds to the swing */
+      var swing = Math.sin(t * 1.7) * 5 + this._toySwing;
       var sx0 = 233, sy0 = 66;
       var sx1 = sx0 + swing, sy1 = 86;
       fillC(g, U.mixHex(L.wall, '#000000', 0.45));
