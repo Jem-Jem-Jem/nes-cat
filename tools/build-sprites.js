@@ -44,10 +44,17 @@ function grid() {
 function emptyMask() {
   return Array.from({ length: H }, () => new Array(W).fill(false));
 }
-function maskOr(a, b) {
+function maskOr(...ms) {
   const m = emptyMask();
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) m[y][x] = a[y][x] || b[y][x];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    for (const a of ms) if (a[y][x]) { m[y][x] = true; break; }
+  }
   return m;
+}
+/* A leg: a short vertical capsule from `topY` down to `footY`. Side view. */
+function maskLeg(x, topY, footY, w) {
+  const cy = (topY + footY) / 2, ry = Math.max(0.5, (footY - topY) / 2);
+  return maskEllipse(x, cy, w / 2, ry);
 }
 function maskEllipse(cx, cy, rx, ry) {
   const m = emptyMask();
@@ -265,6 +272,195 @@ function buildCat(o) {
 
 /* ---------- frame set ----------------------------------------------- */
 
+/* ============================================================
+ * THE SIDE VIEW
+ *
+ * The two views are one system, not two versions of the cat:
+ *
+ *   front  she is facing you. Symmetric, so it reads as "here with you",
+ *          and it is where her face and mood do the most work. Used for
+ *          every stationary state — idle, sit, sleep, eat, drink, groom,
+ *          wash, and being carried.
+ *   side   she is in profile, travelling. A front-facing sprite sliding
+ *          left and right looks like it is moonwalking; in profile the
+ *          stride reads, and she can be mirrored to face her direction of
+ *          travel. Used for the states that cross the room or leave the
+ *          ground — walk, jump, pounce.
+ *
+ * The switch is data, not scattered `if`s: SIDE_STATES in shiro.js names
+ * the travelling states, and frameFor() maps them onto the `side_` frames
+ * emitted here. Side frames are authored facing right and mirrored at
+ * draw time.
+ * ============================================================ */
+
+const SIDE_RIG = {
+  body: { x: 15.0, y: 21.0, rx: 8.5, ry: 4.8 },
+  head: { x: 22.5, y: 13.5, rx: 6.0, ry: 5.5 },
+  legs: {
+    farBack:   { x: 7.0,  lift: 0 },
+    farFront:  { x: 17.0, lift: 0 },
+    nearBack:  { x: 12.0, lift: 0 },
+    nearFront: { x: 22.0, lift: 0 }
+  },
+  tail: { sway: 0, lift: 0, curl: 0 },
+  LEG_TOP: 24.0,
+  LEG_W: 4
+};
+
+/* In profile only one eye shows, and features hang off the head centre
+   rather than the frame's mirror line — so these need their own painters. */
+function eyesSide(G, hx, hy, o, pxIn) {
+  const ex = Math.round(hx + 0.6 + o.look);
+  const ey = Math.round(hy - 1.0);
+
+  if (o.eyes === 'closed') {
+    for (let i = 0; i < 3; i++) pxIn(ex - 1 + i, ey, 'E');
+    return;
+  }
+  if (o.eyes === 'happy') {
+    pxIn(ex - 1, ey + 1, 'E'); pxIn(ex, ey, 'E'); pxIn(ex + 1, ey + 1, 'E');
+    return;
+  }
+  if (o.eyes === 'wide') {
+    for (let y = ey - 1; y <= ey + 2; y++) { pxIn(ex - 1, y, 'E'); pxIn(ex, y, 'E'); }
+    pxIn(ex - 1, ey - 1, 'W');
+    return;
+  }
+  /* open: 2x3 oval with a highlight */
+  for (let y = ey - 1; y <= ey + 1; y++) { pxIn(ex - 1, y, 'E'); pxIn(ex, y, 'E'); }
+  pxIn(ex - 1, ey - 1, 'W');
+}
+
+function faceSide(G, hx, hy, o, pxIn) {
+  const nx = Math.round(hx + SIDE_RIG.head.rx * 0.82);
+  const ny = Math.round(hy + 1.0);
+
+  pxIn(nx, ny, 'N');
+  if (o.mouth === 'open') {
+    pxIn(nx, ny + 1, 'M'); pxIn(nx - 1, ny + 1, 'M');
+    pxIn(nx - 1, ny + 2, 'M');
+  } else if (o.mouth === 'pant') {
+    pxIn(nx, ny + 1, 'M'); pxIn(nx - 1, ny + 1, 'M');
+  } else {
+    pxIn(nx - 1, ny + 1, 'M');
+    pxIn(nx, ny + 2, 'M');
+    pxIn(nx + 1, ny + 1, 'M');
+  }
+}
+
+/* Returns { rows, tail } so checkFrames() can exempt the tail exactly. */
+function buildSideParts(o) {
+  o = Object.assign({
+    bodyX: 0, bodyY: 0, bodyRX: null, bodyRY: null, squash: 0,
+    headDY: 0, headDX: 0,
+    legs: {}, tail: {}, earPerk: 0,
+    eyes: 'open', look: 0, mouth: 'smile', blush: false
+  }, o);
+
+  const G = grid();
+  const FLOOR = 29.0;
+
+  const bx = SIDE_RIG.body.x + o.bodyX;
+  const by = SIDE_RIG.body.y + o.bodyY;
+  const bodyRX = o.bodyRX == null ? SIDE_RIG.body.rx : o.bodyRX;
+  const bodyRY = (o.bodyRY == null ? SIDE_RIG.body.ry : o.bodyRY) + o.squash;
+  const hx = SIDE_RIG.head.x + o.headDX + o.bodyX;
+  const hy = SIDE_RIG.head.y + o.headDY + o.bodyY;
+  const legTop = SIDE_RIG.LEG_TOP + o.bodyY;
+
+  /* A leg's foot rides `lift` px above the floor line; `hide` drops the leg
+     entirely, for poses that tuck their paws under. */
+  const legOf = key => Object.assign({}, SIDE_RIG.legs[key], o.legs[key] || {});
+  const leg = key => {
+    const L = legOf(key);
+    return maskLeg(L.x + o.bodyX, legTop, FLOOR - 1 - (L.lift || 0), SIDE_RIG.LEG_W);
+  };
+  const legsOf = keys =>
+    maskOr(...keys.map(k => (legOf(k).hide ? emptyMask() : leg(k))));
+
+  /* ---- tail (behind everything) ---- */
+  const T = Object.assign({}, SIDE_RIG.tail, o.tail);
+  const tBaseX = bx - bodyRX + 2.5;
+  const tail = stampCurve(G,
+    [tBaseX, by - 0.5],
+    [tBaseX - 3.2 - T.sway, by - 1.5 - T.lift],
+    [tBaseX - 5.0 - T.sway + T.curl, by - 8.0 - T.lift * 1.6 + T.curl],
+    2.4, 'W', 'K');
+
+  /* ---- far legs, in deep shade so they read as a further-away pair ---- */
+  paint(G, legsOf(['farBack', 'farFront']), 'G', 'K');
+
+  /* ---- torso ---- */
+  const bodyMask = maskEllipse(bx, by, bodyRX, bodyRY);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (y + 0.5 > FLOOR) bodyMask[y][x] = false;
+  paint(G, bodyMask, 'W', 'K');
+  shadeBelow(G, bodyMask, bx, by + 1.3, 'H');
+
+  /* ---- near legs, painted over the belly ---- */
+  paint(G, legsOf(['nearBack', 'nearFront']), 'W', 'K');
+
+  /* ---- head, with a cheek bulge so the muzzle is not a plain circle ---- */
+  const headMask = maskEllipse(hx, hy, SIDE_RIG.head.rx, SIDE_RIG.head.ry - o.squash * 0.25);
+  const cheek = maskEllipse(hx + SIDE_RIG.head.rx * 0.62, hy + 1.6, 2.6, 2.4);
+  const headAll = maskOr(headMask, cheek);
+  paint(G, headAll, 'W', 'K');
+
+  /* ---- ears ---- */
+  const perk = o.earPerk;
+  paint(G, maskTri(hx - 4.6, hy - 3.4 - perk, hx - 6.2, hy - 9.4 - perk, hx - 0.6, hy - 5.0), 'W', 'K');
+  paint(G, maskTri(hx + 2.2, hy - 4.0 - perk, hx + 5.6, hy - 9.2 - perk, hx + 5.4, hy - 3.6), 'W', 'K');
+  px(G, hx - 3.9, hy - 5.6 - perk, 'P');
+  px(G, hx + 3.6, hy - 5.8 - perk, 'P');
+
+  /* ---- face, clipped to the skull so nothing floats in the background ---- */
+  const pxIn = (x, y, c) => {
+    const xi = Math.round(x), yi = Math.round(y);
+    if (xi < 0 || xi >= W || yi < 0 || yi >= H) return;
+    if (!headAll[yi][xi]) return;
+    G[yi][xi] = c;
+  };
+  eyesSide(G, hx, hy, o, pxIn);
+  faceSide(G, hx, hy, o, pxIn);
+  shadeBelow(G, headAll, hx, hy + 1.2, 'H');
+
+  /* paw pads on the two near feet, only where the paw is on the ground */
+  const pad = key => {
+    const L = legOf(key);
+    if (L.hide || (L.lift || 0) > 1.5) return;
+    px(G, L.x + o.bodyX - 0.5, Math.round(FLOOR - 2 - (L.lift || 0)), 'P');
+  };
+  pad('nearBack'); pad('nearFront');
+
+  return { rows: G.map(r => r.join('')), tail: tail };
+}
+
+function buildSide(o) {
+  return buildSideParts(o).rows;
+}
+
+/* A four-beat walk. Diagonal leg pairs swing through together and the body
+   rises on the passing beats, so she reads as transferring weight rather than
+   sliding. A lifted paw is both forward and off the floor, which sells the
+   step. */
+function sideWalkPose(phase) {
+  const stride = 2.0;
+  const passing = (phase === 1 || phase === 3);
+  const fwd = phase === 0 ? stride : phase === 2 ? -stride : 0;
+  return {
+    bodyY: passing ? -1 : 0,
+    headDY: passing ? -0.5 : 0,
+    tail: { sway: [0.6, 1.5, 0.6, 1.1][phase] },
+    legs: {
+      nearFront: { x: 22.0 + fwd, lift: phase === 0 ? 2 : 0 },
+      farBack:   { x: 7.0 + fwd,  lift: phase === 0 ? 2 : 0 },
+      nearBack:  { x: 12.0 - fwd, lift: phase === 2 ? 2 : 0 },
+      farFront:  { x: 17.0 - fwd, lift: phase === 2 ? 2 : 0 }
+    }
+  };
+}
+
+/* ---------- frame set ----------------------------------------------- */
+
 function frames() {
   const out = {};
   const TAIL_OF = {};
@@ -275,6 +471,15 @@ function frames() {
     const parts = buildCatParts(o);
     out[name] = parts.rows;
     TAIL_OF[name] = parts.tail;
+  }
+
+  /* Side-view frames are emitted with a `side_` prefix. They are drawn from
+   * a different rig, but they are the same cat, so they live in the same
+   * table and the runtime just picks by name. */
+  function side(name, o) {
+    const parts = buildSideParts(o);
+    out['side_' + name] = parts.rows;
+    TAIL_OF['side_' + name] = parts.tail;
   }
 
   /* --- idle --- */
@@ -370,6 +575,38 @@ function frames() {
   pose('tree_0', { eyes: 'open', earPerk: 1.2, bodyDY: -0.6, pawLift: 2, tailUp: 0.3 });
   pose('tree_1', { eyes: 'happy', earPerk: 1.6, bodyDY: -1.2, pawLift: 4, tailUp: 0.6 });
 
+  /* ------------------------------------------------------------------
+   * Side view — the travelling states. Authored facing right; the runtime
+   * mirrors her when she heads left. Kept to the three states that cross
+   * the room or leave the floor, which are the ones a front-facing sprite
+   * cannot sell.
+   * ---------------------------------------------------------------- */
+
+  /* walk: a real four-beat stride with four visible legs */
+  for (let i = 0; i < 4; i++) {
+    side('walk_' + i, Object.assign({ eyes: 'open' }, sideWalkPose(i)));
+  }
+
+  /* jump: crouch, tuck, stretch, land (the travel is the state machine's) */
+  const tuck = { nearFront: { lift: 3 }, farFront: { lift: 3 }, nearBack: { lift: 3 }, farBack: { lift: 3 } };
+  side('jump_0', { eyes: 'wide', earPerk: 1, bodyY: 1.6, squash: 0.8,
+    legs: { nearFront: { lift: 1 }, farFront: { lift: 1 }, nearBack: { lift: 1 }, farBack: { lift: 1 } }, tail: { lift: 1 } });
+  side('jump_1', { eyes: 'wide', earPerk: 1, bodyY: 0.5, squash: -0.8, legs: tuck, tail: { lift: 3 } });
+  side('jump_2', { eyes: 'open', earPerk: 1, bodyY: -0.5, squash: -1.2,
+    legs: { nearFront: { lift: 2 }, farFront: { lift: 2 }, nearBack: { lift: 1 }, farBack: { lift: 1 } }, tail: { lift: 2 } });
+  side('jump_3', { eyes: 'open', bodyY: 1.2, squash: 1.0,
+    legs: { nearFront: { lift: 1 }, farFront: { lift: 1 } }, tail: { sway: 1.2 } });
+
+  /* pounce: the yarn-ball lunge — coil, spring, land */
+  side('pounce_0', { eyes: 'wide', earPerk: 1, bodyY: 2.2, squash: 1.4, headDY: 1.0,
+    legs: { nearFront: { lift: 2 }, farFront: { lift: 2 }, nearBack: { hide: true }, farBack: { hide: true } },
+    tail: { sway: -1.5, lift: 1 } });
+  side('pounce_1', { eyes: 'wide', earPerk: 1, bodyY: 0.5, squash: -1.0, headDX: 1.0,
+    legs: { nearFront: { lift: 4 }, farFront: { lift: 4 }, nearBack: { lift: 3 }, farBack: { lift: 3 } },
+    tail: { lift: 3 } });
+  side('pounce_2', { eyes: 'open', earPerk: 0.5, bodyY: 1.0, headDX: 1.5,
+    legs: { nearFront: { lift: 1 }, farFront: { lift: 1 } }, tail: { sway: 1.8 } });
+
   TAIL_MASKS = TAIL_OF;
   return out;
 }
@@ -385,14 +622,19 @@ let TAIL_MASKS = {};   /* filled in by frames() */
 const mode = process.argv[2] || '--preview';
 const F = frames();
 
-/* Mechanical verification.
+/* Mechanical verification, per view.
  *
- * Because she is front-on, every frame should mirror — that is the whole
- * reason for this view. The exemptions are all deliberate and precise:
- *   tail pixels  read from the exact mask the builder stamped
- *   walk_*       the walk cycle alternates one paw at a time
- *   *_look_*     a deliberate eye glance off the mirror line
- *   groom/wash   one paw is raised, which is the point of the pose
+ * FRONT frames must mirror — that symmetry is the entire reason for the
+ * front-on sprite, and it is what lets one frame read as facing left or
+ * right. Exemptions there are deliberate: the tail (read from the exact
+ * mask the builder stamped, since a raised tail sits far higher than a
+ * hanging one), the alternating walk paw, the eye glance, and the one-paw-up
+ * grooming poses.
+ *
+ * SIDE frames are asymmetric by nature — she is in profile, facing right, to
+ * be mirrored at draw time. So they are only checked for shape: right size,
+ * and nothing landing on the last row or the last column (the flip pass
+ * would clip the latter).
  */
 function checkFrames() {
   let bad = 0;
@@ -400,10 +642,8 @@ function checkFrames() {
     const rows = F[k];
     if (rows.length !== H) { bad++; console.log('BAD ' + k + ': ' + rows.length + ' rows'); return; }
 
+    const isSide = k.indexOf('side_') === 0;
     const tail = TAIL_MASKS[k];
-    const walking = k.indexOf('walk') === 0;
-    const looking = k.indexOf('look') >= 0;
-    const onePaw = k.indexOf('groom') === 0 || k.indexOf('wash') === 0;
 
     for (let y = 0; y < H; y++) {
       const row = rows[y];
@@ -411,11 +651,17 @@ function checkFrames() {
       for (let x = 0; x < W; x++) {
         if (row[x] === '.') continue;
         if (y === H - 1) { bad++; console.log('BAD ' + k + ': art on the last row'); }
+        if (x === W - 1) { bad++; console.log('BAD ' + k + ': art in the last column'); }
 
-        if (tail && tail[y][x]) continue;                               /* the tail */
-        if (walking && y >= 26) continue;                                /* alternating paw */
-        if (looking) continue;                                           /* eye glance */
-        if (onePaw) continue;                                            /* one paw raised */
+        if (isSide) continue;                         /* profile: no mirror to keep */
+
+        const walking = k.indexOf('walk') === 0;
+        const looking = k.indexOf('look') >= 0;
+        const onePaw = k.indexOf('groom') === 0 || k.indexOf('wash') === 0;
+        if (tail && tail[y][x]) continue;              /* the tail */
+        if (walking && y >= 26) continue;              /* alternating paw */
+        if (looking) continue;                         /* eye glance */
+        if (onePaw) continue;                          /* one paw raised */
 
         if (row[x] !== row[W - 1 - x]) {
           bad++;
@@ -428,9 +674,11 @@ function checkFrames() {
     }
   });
 
+  const n = Object.keys(F).length;
+  const ns = Object.keys(F).filter(k => k.indexOf('side_') === 0).length;
   console.log(bad === 0
-    ? 'FRAME CHECK OK — ' + Object.keys(F).length +
-      ' frames, 32x32, mirror-symmetric outside the exempt zones'
+    ? 'FRAME CHECK OK — ' + n + ' frames (front ' + (n - ns) + ' mirror-symmetric, ' +
+      'side ' + ns + ' flip-safe), all 32x32'
     : 'FRAME CHECK FAIL — ' + bad + ' problems');
   return bad;
 }
