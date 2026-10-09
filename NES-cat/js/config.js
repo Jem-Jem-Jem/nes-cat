@@ -34,8 +34,25 @@
       sleepChanceDay: 0.08,
       blinkMin: 2.2,
       blinkMax: 6.5,
+      blinkDur: 0.16,        /* one blink: half-closed -> shut -> half-open */
       gazeRange: 46,         /* logical px of cursor offset that maxes the glance */
-      bobSpeed: 7.0          /* head bob for the breathe animation */
+      bobSpeed: 7.0,          /* head bob for the breathe animation */
+
+      /* idle flourishes — the small self-started animations that keep her
+       * alive between interactions (see Shiro.rollFlourish) */
+      flourishMin: 4.5,      /* s between flourishes */
+      flourishMax: 10.0,
+      wGlance: 26,           /* relative odds of each flourish being rolled */
+      wTailFlick: 26,
+      wTailUp: 22,
+      wYawn: 16,
+      flourishDur: {
+        glanceL: 1.2,
+        glanceR: 1.2,
+        tailFlick: 0.6,
+        tailUp: 3.4,
+        yawn: 1.6
+      }
     },
 
     /* --- meters (all 0..1) -------------------------------------------- */

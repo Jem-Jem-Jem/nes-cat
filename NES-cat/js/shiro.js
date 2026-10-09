@@ -40,6 +40,8 @@
 
     _blink: 0,
     _blinkNext: 3,
+    _flourish: null,      /* a short idle flourish: glance / tail flick / yawn */
+    _flourishGap: 5,      /* seconds until the next one is rolled */
     _squash: 0,         /* transient squash/stretch amount */
     _squashV: 0,
     _wander: 0,
@@ -58,6 +60,7 @@
     this.y = NESCAT.Scene.FEET_Y - 28;   /* sprite row 28 is her bottom */
     this.load();
     this.buildStateMachine();
+    this._flourishGap = U.rand(CFG.BEHAVIOR.flourishMin, CFG.BEHAVIOR.flourishMax);
   };
 
   Shiro.buildStateMachine = function () {
@@ -292,9 +295,11 @@
     this._blink -= dt;
     if (this._blink <= 0) {
       this._blink = U.rand(CFG.BEHAVIOR.blinkMin, CFG.BEHAVIOR.blinkMax);
-      this._blinkShow = 0.14;
+      this._blinkShow = CFG.BEHAVIOR.blinkDur;
     }
     if (this._blinkShow > 0) this._blinkShow -= dt;
+
+    this.updateFlourish(dt);
 
     /* occlusion / occlusion: dust in the room light */
     if (U.chance(dt * 0.5)) this.spawn('dust');
@@ -304,26 +309,110 @@
     if (this._saveDirty && this._saveT > CFG.SAVE_THROTTLE_MS / 1000) this.save();
   };
 
+  /* ---------- idle flourishes -------------------------------------------- */
+
+  /* A flourish is a short, self-contained burst of character: she glances
+   * around the room, flicks her tail, sweeps it up over her back, or yawns.
+   * Only one ever runs at a time and only while she is idling — that keeps
+   * frameFor() simple, since there are no blink/gaze/tail combinations to
+   * author as separate frames. */
+  Shiro.rollFlourish = function () {
+    var B = CFG.BEHAVIOR;
+    var pool = [
+      ['glanceL', B.wGlance],
+      ['glanceR', B.wGlance],
+      ['tailFlick', B.wTailFlick],
+      ['tailUp', B.wTailUp]
+    ];
+    if (this.meters.energy < 0.45) pool.push(['yawn', B.wYawn]);
+
+    var total = 0, i;
+    for (i = 0; i < pool.length; i++) total += pool[i][1];
+    var r = Math.random() * total;
+    var kind = pool[0][0];
+    for (i = 0; i < pool.length; i++) {
+      r -= pool[i][1];
+      if (r <= 0) { kind = pool[i][0]; break; }
+    }
+
+    this._flourish = { kind: kind, t: 0, dur: B.flourishDur[kind] || 1.2 };
+    if (kind === 'yawn' && this.onSay) this.onSay('sleepy');
+  };
+
+  Shiro.updateFlourish = function (dt) {
+    var B = CFG.BEHAVIOR;
+
+    if (this._flourish) {
+      this._flourish.t += dt;
+      var done = this._flourish.t >= this._flourish.dur;
+      var interrupted = !this._sm.is('idle') || this.petting || this.dragging;
+      if (done || interrupted) {
+        this._flourish = null;
+        this._flourishGap = U.rand(B.flourishMin, B.flourishMax);
+      }
+      return;
+    }
+
+    /* Only while idling; the cursor holds her gaze otherwise. */
+    if (!this._sm.is('idle') || this.petting || this.dragging) return;
+    this._flourishGap -= dt;
+    if (this._flourishGap <= 0) this.rollFlourish();
+  };
+
+  /* 1 = eyes half closed (closing/opening), 2 = fully shut, null = not blinking */
+  Shiro.blinkAt = function () {
+    if (this._blinkShow <= 0) return null;
+    var p = 1 - (this._blinkShow / CFG.BEHAVIOR.blinkDur);
+    return (p >= 0.4 && p < 0.6) ? 2 : 1;
+  };
+
   /* ---------- frame choice ------------------------------------------------ */
 
   Shiro.frameFor = function () {
-    var blinking = this._blinkShow > 0;
-    var breathing = Math.sin(this._bob) > 0.55;
     var st = this._sm.state;
 
     if (st === 'sleep') return (Math.sin(this._bob) > 0) ? 'sleep_0' : 'sleep_1';
     if (st === 'react') return (this._sm.time < 0.16) ? 'react_0' : 'react_1';
-    if (st === 'walk') {
-      var i = Math.floor(this._sm.time * 7) % 4;
-      return 'walk_' + i;
-    }
-    if (st === 'sit') return blinking ? 'sit_closed' : 'sit_open';
+    if (st === 'walk') return 'walk_' + (Math.floor(this._sm.time * 7) % 4);
 
-    /* idle */
-    if (blinking) return breathing ? 'idle_breathe_closed' : 'idle_closed';
+    var breathing = Math.sin(this._bob) > 0.55;
+    var base = breathing ? 'idle_breathe' : 'idle_open';
+    var blink = this.blinkAt();
+
+    if (st === 'sit') return blink === 2 ? 'sit_closed' : 'sit_open';
+
+    /* ---- idle: an active flourish outranks blinking and cursor gaze ---- */
+    var f = this._flourish;
+    if (f) {
+      var p = f.t / f.dur;
+      switch (f.kind) {
+        case 'glanceL':
+          if (this.look === 0) return 'idle_look_left';
+          break;
+        case 'glanceR':
+          if (this.look === 0) return 'idle_look_right';
+          break;
+        case 'yawn':
+          return 'idle_yawn';
+        case 'tailFlick':
+          /* two quick kicks, then settle back onto the base pose */
+          if (Math.floor(f.t / (f.dur / 4)) % 2 === 1) return base + '_tailFlick';
+          return base;
+        case 'tailUp':
+          /* raise (15%) — hold with a lazy sway (70%) — lower (15%) */
+          if (p > 0.15 && p < 0.85) {
+            return base + (Math.sin(f.t * 3.2) > 0 ? '_tailUp1' : '_tailUp0');
+          }
+          return base;
+      }
+    }
+
+    /* ---- idle: blink, then gaze, then breathe ---- */
+    if (blink === 1) return 'idle_blink_mid';
+    if (blink === 2) return breathing ? 'idle_breathe_closed' : 'idle_closed';
     if (this.look < 0) return 'idle_look_left';
     if (this.look > 0) return 'idle_look_right';
-    return breathing ? 'idle_breathe' : 'idle_open';
+    return base;
   };
 
   /* ---------- draw -------------------------------------------------------- */
