@@ -133,19 +133,11 @@
     SAVE_THROTTLE_MS: 1500,
 
     /* --- day/night ------------------------------------------------------ *
-     * Keyframes by hour, interpolated around the clock. `ambient`/`ambientAmt`
-     * are applied to the cat sprite so it sits in the room's light.        */
-    DAYNIGHT: [
-      { h: 0.0, wall: '#2b2b4a', floor: '#1d1d33', window: '#131327', glow: 0.16, ambient: '#2b2b4a', ambientAmt: 0.42 },
-      { h: 5.0, wall: '#3a3858', floor: '#2a2740', window: '#2a2a55', glow: 0.22, ambient: '#3a3858', ambientAmt: 0.38 },
-      { h: 6.5, wall: '#8a6f8e', floor: '#6b4f46', window: '#e8a06a', glow: 0.42, ambient: '#c08a86', ambientAmt: 0.22 },
-      { h: 8.0, wall: '#cbb79a', floor: '#a9743f', window: '#ffe9a8', glow: 0.72, ambient: '#ffffff', ambientAmt: 0.05 },
-      { h: 12.0, wall: '#d9c7a7', floor: '#b07d45', window: '#fff4cf', glow: 0.92, ambient: '#ffffff', ambientAmt: 0.0 },
-      { h: 16.0, wall: '#d2bd9a', floor: '#a9743f', window: '#ffe6a0', glow: 0.82, ambient: '#fff3d6', ambientAmt: 0.06 },
-      { h: 18.5, wall: '#b5766a', floor: '#8a5533', window: '#ff9e5a', glow: 0.55, ambient: '#e79a6a', ambientAmt: 0.18 },
-      { h: 20.5, wall: '#5c4266', floor: '#43304a', window: '#4a3a7a', glow: 0.30, ambient: '#6a5288', ambientAmt: 0.34 },
-      { h: 24.0, wall: '#2b2b4a', floor: '#1d1d33', window: '#131327', glow: 0.16, ambient: '#2b2b4a', ambientAmt: 0.42 }
-    ],
+     * There is no table here on purpose. Lighting is derived from the sun's
+     * height in palette.at(), so dawn and dusk are a consequence of the
+     * clock rather than a list of hand-placed conditions. The one thing you
+     * can still tune is how dark the room gets at night.               */
+    NIGHT_DIM: 0.44,        /* peak ambient tint applied to the room/cat */
 
     /* --- dialogue ------------------------------------------------------- *
      * Keyed by situation; ui.js picks and speaks them.                    */
