@@ -39,9 +39,11 @@
       bobSpeed: 7.0,          /* head bob for the breathe animation */
 
       /* idle flourishes — the small self-started animations that keep her
-       * alive between interactions (see Shiro.rollFlourish) */
-      flourishMin: 4.5,      /* s between flourishes */
-      flourishMax: 10.0,
+       * alive between interactions (see Shiro.rollFlourish). These fire
+       * while she is idling *or* sitting; the gaps are short because she
+       * does not stay still for long any more. */
+      flourishMin: 2.2,      /* s between flourishes */
+      flourishMax: 6.0,
       wGlance: 26,           /* relative odds of each flourish being rolled */
       wTailFlick: 26,
       wTailUp: 22,
@@ -73,7 +75,10 @@
       /* Odds that a wander roll becomes each activity. An activity gated on
        * a meter or on the room (eating needs food in the bowl) is skipped
        * when unavailable rather than re-rolled. */
-      wSit: 26,
+      /* Sitting carries the most weight on purpose: activities keep her
+       * crossing the room, and she needs to actually stand still for the
+       * idle flourishes (glance, tail flick, yawn) to be visible at all. */
+      wSit: 62,
       wGroom: 16,
       wWash: 12,
       wTree: 18,
@@ -82,7 +87,11 @@
       /* hunger climbs as she gets hungry; past this she heads for the bowl */
       hungryBelow: 0.45,
       /* the cat tree is only worth jumping at when she is already near it */
-      treeNearX: 26
+      treeNearX: 26,
+
+      /* how high she can be lifted when picked up (logical px above the
+       * floor); keeps a drag from dragging her off the top of the room */
+      carryLiftMax: 64
     },
 
     /* --- meters (all 0..1) -------------------------------------------- */

@@ -349,22 +349,38 @@
     }
   };
 
+  /* ---------- carrying -------------------------------------------------
+   Picking her up used to freeze the sprite: the state machine is not ticked
+   while dragging (the cursor owns her position), and dragTo() only ever
+   received an x, so she slid along the floor with one locked frame.
+   Now the pointer's y sets how high she is held, and a private timer keeps
+   a dangling cycle playing while she is off the ground. */
+
   Shiro.dragStart = function () {
     this.petting = false;
     this.dragging = true;
+    this._carryT = 0;
+    this._lift = 0;
     if (this._sm.is('sleep')) this.wake();
     this._sm.set('react', { say: null });
   };
 
-  Shiro.dragTo = function (x) {
-    /* face the way she is being dragged (test before moving) */
-    this.facing = x >= this.x ? 1 : -1;
+  Shiro.dragTo = function (x, y) {
     this.x = U.clamp(x, NESCAT.Scene.WALK_MIN_X - 12, NESCAT.Scene.WALK_MAX_X + 12);
+    if (y == null) return;
+    /* Grab point is roughly the middle of the sprite (row 16). Solving
+     * `this.y - lift == y - 16` gives the height that puts her under the
+     * cursor; clamped so she cannot sink through the floor or fly off. */
+    var want = this.y - (y - 16);
+    this._lift = U.clamp(want, 0, CFG.BEHAVIOR.carryLiftMax);
   };
 
   Shiro.dragEnd = function () {
     this.dragging = false;
     this._squashV = 10;
+    /* drop her: fall back to the floor, then squash on landing */
+    this._fallFrom = this._lift || 0;
+    this._lift = 0;
     this._sm.set('react', { say: 'wake' });
   };
 
@@ -456,7 +472,13 @@
     }
 
     this.petTick(dt);
-    if (!this.dragging) this._sm.update(dt);
+    if (this.dragging) {
+      /* the state machine is paused while carried, so drive the dangling
+       * cycle and the squash spring by hand — otherwise she freezes */
+      this._carryT += dt;
+    } else {
+      this._sm.update(dt);
+    }
     this.updateParticles(dt);
 
     /* blink timing */
@@ -481,9 +503,17 @@
 
   /* A flourish is a short, self-contained burst of character: she glances
    * around the room, flicks her tail, sweeps it up over her back, or yawns.
-   * Only one ever runs at a time and only while she is idling — that keeps
-   * frameFor() simple, since there are no blink/gaze/tail combinations to
-   * author as separate frames. */
+   * Only one ever runs at a time.
+   *
+   * These fire while she is idling *or sitting*. Gating them on 'idle' alone
+   * was quietly wrong once activities were added: she now spends most of her
+   * life walking to bowls and pouncing at yarn, so the 'idle' windows are
+   * short and rare, and the glance/tail animations basically never appeared.
+   * Sitting is just as natural a place for them. */
+  Shiro.idleish = function () {
+    return this._sm.is('idle') || this._sm.is('sit');
+  };
+
   Shiro.rollFlourish = function () {
     var B = CFG.BEHAVIOR;
     var pool = [
@@ -513,7 +543,7 @@
     if (this._flourish) {
       this._flourish.t += dt;
       var done = this._flourish.t >= this._flourish.dur;
-      var interrupted = !this._sm.is('idle') || this.petting || this.dragging;
+      var interrupted = !this.idleish() || this.petting || this.dragging;
       if (done || interrupted) {
         this._flourish = null;
         this._flourishGap = U.rand(B.flourishMin, B.flourishMax);
@@ -521,8 +551,8 @@
       return;
     }
 
-    /* Only while idling; the cursor holds her gaze otherwise. */
-    if (!this._sm.is('idle') || this.petting || this.dragging) return;
+    /* While idle or sitting; the cursor holds her gaze otherwise. */
+    if (!this.idleish() || this.petting || this.dragging) return;
     this._flourishGap -= dt;
     if (this._flourishGap <= 0) this.rollFlourish();
   };
@@ -536,10 +566,28 @@
 
   /* ---------- frame choice ------------------------------------------------ */
 
+  /* Flourish frames are composed as base + suffix (e.g. 'sit_closed_tailUp1').
+   * That is convenient but fragile: a blink landing mid-flourish asks for a
+   * combination that must exist. Resolve every name against the real frame
+   * table and fall back to the base pose if it does not, so a missing
+   * variant costs a flourish rather than making her vanish for a frame. */
+  Shiro.pickFrame = function (name, fallback) {
+    var f = this.sprite && this.sprite.frames;
+    return (f && f[name]) ? name : fallback;
+  };
+
   Shiro.frameFor = function () {
     var st = this._sm.state;
     var t = this._sm.time;
     var Bh = CFG.BEHAVIOR;
+
+    /* Carried: a dangling cycle on its own timer, because the state
+     * machine is not ticked while the cursor owns her. */
+    if (this.dragging) {
+      var c = Math.floor(this._carryT * 4) % 3;
+      return c === 0 ? 'held_0' : (c === 1 ? 'held_1' : 'held_2');
+    }
+    var self = this;
 
     /* A short leading frame then a two-frame loop reads as a cycle without
      * needing a separate "loop start" per state. */
@@ -570,36 +618,45 @@
     if (st === 'tree') return (Math.sin(t * 1.9) > 0) ? 'tree_0' : 'tree_1';
 
     var breathing = Math.sin(this._bob) > 0.55;
-    var base = breathing ? 'idle_breathe' : 'idle_open';
     var blink = this.blinkAt();
+    /* Sitting has its own base pose, but the tail variants exist for it too,
+     * so a flourish reads the same whether she is on her feet or sat down. */
+    var sitting = st === 'sit';
+    var base = sitting
+      ? (blink === 2 ? 'sit_closed' : 'sit_open')
+      : (breathing ? 'idle_breathe' : 'idle_open');
 
-    if (st === 'sit') return blink === 2 ? 'sit_closed' : 'sit_open';
-
-    /* ---- idle: an active flourish outranks blinking and cursor gaze ---- */
+    /* ---- idle/sit: an active flourish outranks blinking and cursor gaze ---- */
     var f = this._flourish;
     if (f) {
       var p = f.t / f.dur;
       switch (f.kind) {
         case 'glanceL':
-          if (this.look === 0) return 'idle_look_left';
+          /* a glance only shows if the cursor is not already holding her gaze */
+          if (this.look === 0 && !sitting) return 'idle_look_left';
           break;
         case 'glanceR':
-          if (this.look === 0) return 'idle_look_right';
+          if (this.look === 0 && !sitting) return 'idle_look_right';
           break;
         case 'yawn':
           return 'idle_yawn';
         case 'tailFlick':
           /* two quick kicks, then settle back onto the base pose */
-          if (Math.floor(f.t / (f.dur / 4)) % 2 === 1) return base + '_tailFlick';
+          if (Math.floor(f.t / (f.dur / 4)) % 2 === 1) {
+            return self.pickFrame(base + '_tailFlick', base);
+          }
           return base;
         case 'tailUp':
           /* raise (15%) — hold with a lazy sway (70%) — lower (15%) */
           if (p > 0.15 && p < 0.85) {
-            return base + (Math.sin(f.t * 3.2) > 0 ? '_tailUp1' : '_tailUp0');
+            var v = Math.sin(f.t * 3.2) > 0 ? '_tailUp1' : '_tailUp0';
+            return self.pickFrame(base + v, base);
           }
           return base;
       }
     }
+
+    if (sitting) return base;
 
     /* ---- idle: blink, then gaze, then breathe ---- */
     if (blink === 1) return 'idle_blink_mid';
@@ -616,10 +673,10 @@
     var ambient = light ? light.ambient : null;
     var amt = light ? light.ambientAmt : 0;
 
-    /* She is authored facing right and mirrored to face left. Mid-air the
+    /* She is drawn front-on, so no horizontal flip is needed. Mid-air the
      * shadow stays on the floor and shrinks, which is what sells the height. */
     var lift = this._lift || 0;
-    var air = lift / 14;
+    var air = U.clamp(lift / 26, 0, 1);
 
     g.noStroke();
     g.fill(0, 0, 0, Math.round(60 * (1 - air * 0.55)));
@@ -631,8 +688,7 @@
 
     NESCAT.Sprite.draw(g, this.sprite, this.frameFor(), this.x, this.y - lift, {
       ambient: ambient,
-      ambientAmt: amt,
-      flip: this.facing < 0
+      ambientAmt: amt
     });
 
     this.drawParticles(g, true);

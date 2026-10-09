@@ -87,7 +87,7 @@
           this.dragging = true;
           NESCAT.Shiro.dragStart();
         }
-        if (this.dragging) NESCAT.Shiro.dragTo(p.x - 16);
+        if (this.dragging) NESCAT.Shiro.dragTo(p.x - 16, p.y);
       }
       this.updateGaze();
     },
