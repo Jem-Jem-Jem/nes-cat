@@ -120,7 +120,8 @@ function stampCurve(G, p0, p1, p2, radius, fill, outline) {
 
 /* ---------- feature painters --------------------------------------- */
 
-function eyes(G, mode, dy, look) {
+function eyes(G, mode, dy, look, dx) {
+  dx = dx || 0;
   const y = 11 + dy;
   look = look || 0;   /* -1 = glance left, +1 = glance right */
   if (mode === 'closed') {
@@ -152,7 +153,8 @@ function eyes(G, mode, dy, look) {
   px(G, 20 + look, y - 1, 'W');
 }
 
-function face(G, dy, mouth) {
+function face(G, dy, mouth, dx) {
+  dx = dx || 0;
   const y = 11 + dy;
   // nose (2px, centred on the mirror line at x=15.5)
   px(G, 15, y + 3, 'N'); px(G, 16, y + 3, 'N');
@@ -227,7 +229,8 @@ function buildCatParts(o) {
   paint(G, bodyAll, 'W', 'K');
 
   /* head */
-  const headMask = maskEllipse(cx, 10.5 + o.headDY, 8.4, 6.5 - o.squash * 0.3);
+  const headDX = o.headDX || 0;
+  const headMask = maskEllipse(cx + headDX, 10.5 + o.headDY, 8.4, 6.5 - o.squash * 0.3);
   paint(G, headMask, 'W', 'K');
 
   /* ears (drawn on top so their outline reads). They must travel with the
@@ -235,21 +238,21 @@ function buildCatParts(o) {
    their rest position would float free of it. */
   const perk = o.earPerk;
   const hy = o.headDY;
-  const earL = maskTri(10.5, 2.0 - perk + hy, 5.2, 9.0 + hy, 14.2, 8.0 + hy);
-  const earR = maskTri(21.5, 2.0 - perk + hy, 26.8, 9.0 + hy, 17.8, 8.0 + hy);
+  const earL = maskTri(10.5 + headDX, 2.0 - perk + hy, 5.2 + headDX, 9.0 + hy, 14.2 + headDX, 8.0 + hy);
+  const earR = maskTri(21.5 + headDX, 2.0 - perk + hy, 26.8 + headDX, 9.0 + hy, 17.8 + headDX, 8.0 + hy);
   paint(G, earL, 'W', 'K');
   paint(G, earR, 'W', 'K');
-  const inL = maskTri(10.5, 4.3 - perk + hy, 7.4, 8.2 + hy, 13.0, 7.6 + hy);
-  const inR = maskTri(21.5, 4.3 - perk + hy, 24.6, 8.2 + hy, 19.0, 7.6 + hy);
+  const inL = maskTri(10.5 + headDX, 4.3 - perk + hy, 7.4 + headDX, 8.2 + hy, 13.0 + headDX, 7.6 + hy);
+  const inR = maskTri(21.5 + headDX, 4.3 - perk + hy, 24.6 + headDX, 8.2 + hy, 19.0 + headDX, 7.6 + hy);
   paint(G, inL, 'P', 'P');
   paint(G, inR, 'P', 'P');
 
   /* features */
-  eyes(G, o.eyes, o.headDY, o.look);
-  face(G, o.headDY, o.mouth);
+  eyes(G, o.eyes, o.headDY, o.look, headDX);
+  face(G, o.headDY, o.mouth, headDX);
 
   /* shading: bottom half of head + body */
-  shadeBelow(G, headMask, cx, 12 + o.headDY, 'H');
+  shadeBelow(G, headMask, cx + headDX, 12 + o.headDY, 'H');
   shadeBelow(G, bodyAll, cx, 23 + o.bodyDY, 'H');
 
   /* leg seam: a deeper shade line between the two front paws */
@@ -590,6 +593,29 @@ function frames() {
   pose('loaf_0', Object.assign({}, loafA));
   pose('loaf_1', Object.assign({}, loafA, { squash: 2.2, headDY: 2.5 }));
 
+  /* --- shake: the full-body shudder she does the instant she is put down.
+   * headDX swings the whole skull side to side — the ears and face travel
+   * with it, which is what makes it read as a shake rather than a glance. --- */
+  pose('shake_0', { eyes: 'closed', earPerk: 1.4, headDX: -1.6, headDY: 0.5, tailUp: 0.5 });
+  pose('shake_1', { eyes: 'closed', earPerk: 1.4, headDX: 1.6, headDY: 0.5, tailUp: 0.5 });
+  pose('shake_2', { eyes: 'happy', earPerk: 0.6, headDX: 0, headDY: -0.3, tailUp: 0.3 });
+
+  /* --- alert: something caught her ear. Head up, ears forward, eyes wide.
+   * Reads as attention rather than alarm because the mouth stays a smile. --- */
+  pose('alert_0', { eyes: 'wide', earPerk: 1.3, headDY: -1.6, tailUp: 0.6, mouth: 'pant' });
+  pose('alert_1', { eyes: 'open', earPerk: 1.1, headDY: -1.2, tailUp: 0.4 });
+
+  /* --- knead: working a blanket with her forepaws, head down watching.
+   * Both paws ride the same lift, so the alternation lives in the runtime
+   * rather than in two near-identical frames. --- */
+  const kneadA = { eyes: 'closed', earPerk: -0.3, headDY: 1.4, tailUp: 0.5 };
+  pose('knead_0', Object.assign({}, kneadA, { pawLift: 2.5 }));
+  pose('knead_1', Object.assign({}, kneadA, { pawLift: 4.0, headDY: 1.0 }));
+
+  /* --- settling into sleep: curling down over the sleep pose rather than
+   * snapping into it. --- */
+  pose('sleep_settle', { eyes: 'closed', sleep: true, bodyDY: 0.5, headDY: 1.0, squash: 0.6, earPerk: -0.4 });
+
   /* Everything below this line moved to the profile rig: held, jump, eat,
    * drink, groom, wash, pounce and tree are all poses where what matters is
    * her body reaching or bending somewhere, and a front-facing sprite
@@ -770,10 +796,12 @@ function checkFrames() {
         const walking = k.indexOf('walk') === 0;
         const looking = k.indexOf('look') >= 0;
         const onePaw = k.indexOf('groom') === 0 || k.indexOf('wash') === 0;
+        const shaking = k.indexOf('shake') === 0;
         if (tail && tail[y][x]) continue;              /* the tail */
         if (walking && y >= 26) continue;              /* alternating paw */
         if (looking) continue;                         /* eye glance */
         if (onePaw) continue;                          /* one paw raised */
+        if (shaking) continue;                         /* head swung side to side */
 
         if (row[x] !== row[W - 1 - x]) {
           bad++;

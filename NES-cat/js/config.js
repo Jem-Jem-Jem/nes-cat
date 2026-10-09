@@ -112,7 +112,15 @@
       stretchDur: 1.7,
       loafDur: 5.5,
       wStretch: 18,
-      wLoaf: 14
+      wLoaf: 14,
+
+      /* the rest of the idle repertoire */
+      shakeDur: 0.52,     /* the shudder on landing after being carried */
+      alertDur: 1.15,
+      kneadDur: 4.2,
+      wAlert: 12,
+      wKnead: 15,
+      sleepSettle: 0.9,   /* she curls down into sleep rather than snapping */
     },
 
     /* --- meters (all 0..1) -------------------------------------------- */
@@ -178,6 +186,7 @@
       wake: ['mm? oh! hi.', 'i was dreaming.'],
       hungry: ['my tummy is rumbly.', 'snack?'],
       happy: ['i love it here.', 'best day.'],
+      alert: ['what was that?', 'did you hear?', 'hm?'],
       idle: ['nice light today.', 'i like this room.', 'just sitting.']
     }
   };

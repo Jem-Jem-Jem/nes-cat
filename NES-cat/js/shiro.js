@@ -339,9 +339,14 @@
 
       /* the long stretch: spine uncoiling, rump up, then easing back */
       stretch: {
-        enter: function () {
+        enter: function (payload) {
           self._act = { dur: B.stretchDur };
-          if (self.onSay && U.chance(0.4)) self.onSay('idle');
+          /* waking stretches, and then says something about it */
+          if (payload && payload.fromSleep) {
+            if (self.onSay) self.onSay('wake');
+          } else if (self.onSay && U.chance(0.4)) {
+            self.onSay('idle');
+          }
         },
         update: function (dt, s) {
           if (s.time > self._act.dur) sm.set('idle');
@@ -352,6 +357,44 @@
       loaf: {
         enter: function () {
           self._act = { dur: B.loafDur };
+        },
+        update: function (dt, s) {
+          if (s.time > self._act.dur) sm.set('idle');
+        }
+      },
+
+      /* shake: the shudder she does the instant she is put down. It is the
+       * natural end of being carried — without it she simply stops hanging
+       * and the release reads as a sprite swap rather than a cat landing. */
+      shake: {
+        enter: function () {
+          self._act = { dur: B.shakeDur };
+          self._lift = 0;
+        },
+        update: function (dt, s) {
+          if (s.time > self._act.dur) sm.set('react', { say: null });
+        }
+      },
+
+      /* alert: something caught her ear. Snaps her head up, holds, then
+       * settles — attention, not alarm, since the mouth stays a smile. */
+      alert: {
+        enter: function () {
+          self._act = { dur: B.alertDur };
+          if (self.onSay && U.chance(0.5)) self.onSay('alert');
+        },
+        update: function (dt, s) {
+          if (s.time > self._act.dur) sm.set('idle');
+        }
+      },
+
+      /* knead: working a blanket. Both paws ride one lift, so the
+       * alternation is a phase offset in frameFor rather than two frames
+       * that are almost identical. */
+      knead: {
+        enter: function () {
+          self._act = { dur: B.kneadDur };
+          if (self.onSay && U.chance(0.35)) self.onSay('happy');
         },
         update: function (dt, s) {
           if (s.time > self._act.dur) sm.set('idle');
@@ -434,6 +477,9 @@
     /* idle postures: a stretch and a loaf are different from sitting */
     pool.push(['stretch', B.wStretch]);
     if (this.meters.energy > 0.45) pool.push(['loaf', B.wLoaf]);
+    pool.push(['knead', B.wKnead]);
+    /* something caught her ear — more likely when she is wide awake */
+    if (this.meters.energy > 0.6) pool.push(['alert', B.wAlert]);
     if (this.meters.energy > 0.3) pool.push(['wash', B.wWash]);
     if (Sc.water > 0.05) pool.push(['drink', 18]);
     if (Math.abs(this.x - Sc.CAT_TREE_X) < B.treeNearX) pool.push(['tree', B.wTree]);
@@ -454,6 +500,8 @@
     if (kind === 'watch') { this._sm.set('watch'); return; }
     if (kind === 'stretch') { this._sm.set('stretch'); return; }
     if (kind === 'loaf') { this._sm.set('loaf'); return; }
+    if (kind === 'knead') { this._sm.set('knead'); return; }
+    if (kind === 'alert') { this._sm.set('alert'); return; }
 
     /* stays put: point her at the fixture and let the state walk her over */
     if (kind === 'eat') this._sm.set('eat', { from: null });
@@ -516,10 +564,9 @@
   Shiro.dragEnd = function () {
     this.dragging = false;
     this._squashV = 10;
-    /* drop her: fall back to the floor, then squash on landing */
-    this._fallFrom = this._lift || 0;
+    /* drop her: fall back to the floor, then shudder off on landing */
     this._lift = 0;
-    this._sm.set('react', { say: 'wake' });
+    this._sm.set('shake');
   };
 
   Shiro.play = function () {
@@ -530,9 +577,12 @@
     this._sm.set('react', { say: 'play' });
   };
 
+  /* Waking up stretches. Routing wake() through the stretch state rather than
+   straight to react means the most common transition in the whole piece —
+   asleep to awake — actually looks like a cat getting up. */
   Shiro.wake = function () {
     this._squash = 0.4;
-    this._sm.set('react', { say: 'wake' });
+    this._sm.set('stretch', { fromSleep: true });
   };
 
   /* ---------- meters ---------------------------------------------------- */
@@ -782,7 +832,11 @@
       return frames[1 + (Math.floor((t - lead) * rate) % (frames.length - 1))];
     }
 
-    if (st === 'sleep') return (Math.sin(this._bob) > 0) ? 'sleep_0' : 'sleep_1';
+    if (st === 'sleep') {
+      /* she curls down into the sleep rather than snapping into it */
+      if (t < Bh.sleepSettle) return 'sleep_settle';
+      return (Math.sin(this._bob) > 0) ? 'sleep_0' : 'sleep_1';
+    }
     if (st === 'react') return (t < 0.16) ? 'react_0' : 'react_1';
     /* The rotation itself: hold the pose we are leaving, step through the two
      * three-quarter frames, and let the destination state draw its first
@@ -855,6 +909,30 @@
     /* loaf: just breathing, until she decides to unfold */
     if (st === 'loaf') {
       return (Math.sin(t * 1.7) > 0) ? 'loaf_0' : 'loaf_1';
+    }
+
+    /* shake: a fast alternating shudder, then a settle */
+    if (st === 'shake') {
+      var sp = t / Bh.shakeDur;
+      if (sp < 0.66) {
+        var sh = Math.floor(t / (Bh.shakeDur / 6));
+        return sh % 2 === 0 ? 'shake_0' : 'shake_1';
+      }
+      return 'shake_2';
+    }
+
+    /* alert: snap up, hold, ease back down */
+    if (st === 'alert') {
+      var ap = t / Bh.alertDur;
+      if (ap < 0.25) return 'alert_0';
+      if (ap < 0.7) return 'alert_1';
+      return 'idle_open';
+    }
+
+    /* knead: two poses, alternating fast — a phase offset reads as paws
+       * working rather than a two-frame loop */
+    if (st === 'knead') {
+      return (Math.sin(t * 7.5) > 0) ? 'knead_0' : 'knead_1';
     }
 
     var breathing = Math.sin(this._bob) > 0.55;
