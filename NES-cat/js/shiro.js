@@ -90,7 +90,7 @@
             ? payload.x
             : U.rand(NESCAT.Scene.WALK_MIN_X, NESCAT.Scene.WALK_MAX_X);
           self._walkDur = U.rand(B.walkMin, B.walkMax);
-          self._walkFromSide = !!payload && payload.fromSide;
+          self._walkStartX = self.x;   /* the stride is measured from here */
         },
         update: function (dt, s) {
           var dx = self._targetX - self.x;
@@ -815,8 +815,16 @@
       return 'idle_open';
     }
 
-    /* travelling states are drawn in profile */
-    if (st === 'walk') return 'side_walk_' + (Math.floor(t * 7) % 4);
+    /* Stepping is driven by distance travelled, not by elapsed time. Cycling
+   * on a clock means the paws slide whenever her speed and the frame rate
+   * disagree — which is always, because she accelerates, turns and stops.
+   * One frame per fixed distance travelled means the stride stays under
+   * her however fast she is going. */
+    if (st === 'walk') {
+      var stride = Bh.walkStride || 5;
+      var step = Math.floor(Math.abs(this.x - (this._walkStartX || this.x)) / stride);
+      return 'side_walk_' + (step % 6);
+    }
 
     if (st === 'jump') {
       if (t < Bh.jumpDur * 0.22) return 'side_jump_0';

@@ -467,23 +467,36 @@ function buildSide(o) {
   return buildSideParts(o).rows;
 }
 
-/* A four-beat walk. Diagonal leg pairs swing through together and the body
-   rises on the passing beats, so she reads as transferring weight rather than
-   sliding. A lifted paw is both forward and off the floor, which sells the
-   step. */
+/* A four-beat diagonal gait with two passing beats: four frames of the
+   diagonal pairs swinging through, then two where the body rides highest
+   and the trailing legs come under it. Six is the point at which the cycle
+   stops reading as a shuffle.
+   The head leads the body's rise slightly, which is what stops the whole
+   sprite bobbing as one rigid piece. */
+const WALK_CYCLE = [
+  /* nearFront, farBack, nearBack, farFront, bodyY, headDY, tailSway */
+  { f: [1, 1, -1, -1], by: 0, hd: 0.2, ts: 0.6 },
+  { f: [1, 1, 0, 0], by: -1, hd: -0.6, ts: 1.5 },
+  { f: [0, 0, 1, 1], by: 0, hd: 0.2, ts: 1.0 },
+  { f: [-1, -1, 1, 1], by: 0, hd: 0.2, ts: 0.6 },
+  { f: [-1, -1, 0, 0], by: -1, hd: -0.6, ts: 1.5 },
+  { f: [0, 0, -1, -1], by: 0, hd: 0.2, ts: 1.0 }
+];
+
 function sideWalkPose(phase) {
   const stride = 2.0;
-  const passing = (phase === 1 || phase === 3);
-  const fwd = phase === 0 ? stride : phase === 2 ? -stride : 0;
+  const c = WALK_CYCLE[phase % WALK_CYCLE.length];
+  /* a leg swinging forward is also lifted off the floor */
+  const lf = f => (f > 0 ? 2 : 0);
   return {
-    bodyY: passing ? -1 : 0,
-    headDY: passing ? -0.5 : 0,
-    tail: { sway: [0.6, 1.5, 0.6, 1.1][phase] },
+    bodyY: c.by,
+    headDY: c.hd,
+    tail: { sway: c.ts },
     legs: {
-      nearFront: { x: 22.0 + fwd, lift: phase === 0 ? 2 : 0 },
-      farBack:   { x: 7.0 + fwd,  lift: phase === 0 ? 2 : 0 },
-      nearBack:  { x: 12.0 - fwd, lift: phase === 2 ? 2 : 0 },
-      farFront:  { x: 17.0 - fwd, lift: phase === 2 ? 2 : 0 }
+      nearFront: { x: 22.0 + c.f[0] * stride, lift: lf(c.f[0]) },
+      farBack:   { x: 7.0 + c.f[1] * stride, lift: lf(c.f[1]) },
+      nearBack:  { x: 12.0 - c.f[2] * stride, lift: lf(c.f[2]) },
+      farFront:  { x: 17.0 - c.f[3] * stride, lift: lf(c.f[3]) }
     }
   };
 }
@@ -599,8 +612,8 @@ function frames() {
    * sit, sleep, react — where the symmetry and the expression do the work.
    * ---------------------------------------------------------------- */
 
-  /* walk: a real four-beat stride with four visible legs */
-  for (let i = 0; i < 4; i++) {
+  /* walk: the full cycle, six frames — see WALK_CYCLE */
+  for (let i = 0; i < 6; i++) {
     side('walk_' + i, Object.assign({ eyes: 'open' }, sideWalkPose(i)));
   }
 

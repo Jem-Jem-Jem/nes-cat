@@ -26,6 +26,9 @@
       wanderMax: 13.0,
       walkMin: 2.6,
       walkMax: 5.0,
+      /* logical px of ground covered per walk frame. Stepping is driven by
+       * distance rather than by a clock so the paws never skate. */
+      walkStride: 5.2,
       sitMin: 5.0,
       sitMax: 11.0,
       reactMin: 1.5,
