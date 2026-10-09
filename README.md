@@ -205,3 +205,7 @@ them directly, so there is one generated file and one tool.
 
 - [p5.js reference](https://p5js.org/reference/)
 - [NES.css](https://nostalgic-css.github.io/NES.css/)
+
+## License
+
+[MIT](LICENSE) — do what you like with it.

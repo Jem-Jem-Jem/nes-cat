@@ -9,7 +9,7 @@
     "creative-coding",
     "chiptune"
   ],
-  "license": "ISC",
+  "license": "MIT",
   "author": "jem-jem-jem",
   "type": "commonjs",
   "scripts": {
