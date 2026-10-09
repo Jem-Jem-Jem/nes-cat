@@ -93,6 +93,10 @@
     },
 
     _up: function (e) {
+      /* Only a gesture that STARTED on the canvas counts. Without this guard a
+       * pointer-up from the HUD buttons (SOUND, PRESS START) would be read as a
+       * "click the room to play" and fire Shiro.play(). */
+      if (!this.pressed) { this.updateGaze(); return; }
       var p = this._locate(e);
       this.x = p.x; this.y = p.y;
 
