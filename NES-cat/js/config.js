@@ -94,6 +94,10 @@
        * floor); keeps a drag from dragging her off the top of the room */
       carryLiftMax: 64,
 
+      /* the carried animation, as a sequence rather than a loop: the "!" as her
+       * paws leave the floor, the hang, the startled kicks, then settling */
+      held: { lift: 0.34, dangle: 1.15, kick: 0.55 },
+
       /* the rotation between the front and profile views. turnDur spans the
        * from-pose, both three-quarter frames and the hand-off, so ~0.45s
        * reads as a deliberate pivot rather than a flicker. */

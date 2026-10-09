@@ -723,11 +723,23 @@
     var t = this._sm.time;
     var Bh = CFG.BEHAVIOR;
 
-    /* Carried: a dangling cycle on its own timer, because the state
-     * machine is not ticked while the cursor owns her. */
+    /* Carried. This is a sequence, not a loop: there is a "!" at the instant
+     * her paws leave the floor, then the hang, a couple of startled kicks,
+     * and finally settling into it. A single looping dangle reads as a
+     * frozen sprite; the arc is what sells that she is being held. */
     if (this.dragging) {
-      var c = Math.floor(this._carryT * 4) % 3;
-      return c === 0 ? 'side_held_0' : (c === 1 ? 'side_held_1' : 'side_held_2');
+      var Bc = CFG.BEHAVIOR.held;
+      var ct = this._carryT;
+      if (ct < Bc.lift) return 'side_held_lift';
+      if (ct < Bc.lift + Bc.dangle) {
+        return ((ct - Bc.lift) * 5) % 2 < 1 ? 'side_held_dangle_0' : 'side_held_dangle_1';
+      }
+      if (ct < Bc.lift + Bc.dangle + Bc.kick) {
+        return Math.floor((ct - Bc.lift - Bc.dangle) * 7) % 2 === 0
+          ? 'side_held_kick_0' : 'side_held_kick_1';
+      }
+      return Math.sin((ct - Bc.lift - Bc.dangle - Bc.kick) * 2.0) > 0
+        ? 'side_held_calm_0' : 'side_held_calm_1';
     }
     var self = this;
 

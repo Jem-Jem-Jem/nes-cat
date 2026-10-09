@@ -639,13 +639,32 @@ function frames() {
   /* held: dangling from a hand, legs hanging loose. In profile the drop of
      the paws and the drag of the tail actually read; face-on they just look
      like a standing cat with its feet off the ground. */
-  const dangling = l => ({
-    eyes: 'wide', earPerk: 1.2, bodyY: 1.4,
-    legs: { farBack: { lift: l }, farFront: { lift: l }, nearBack: { lift: l }, nearFront: { lift: l } }
+  /* held: the whole arc of being picked up, not one looping dangle. There is
+   a "!" the instant her paws leave the floor, then the hang, a couple of
+   startled kicks, and finally settling. Each stage says something different
+   and none of them can be substituted for another. */
+  const hang = l => ({
+    farBack: { lift: l }, farFront: { lift: l },
+    nearBack: { lift: l }, nearFront: { lift: l }
   });
-  side('held_0', Object.assign(dangling(-2), { tail: { sway: 0 } }));
-  side('held_1', Object.assign(dangling(-3), { bodyY: 1.8, earPerk: 1.4, tail: { sway: -1.2 } }));
-  side('held_2', Object.assign(dangling(-2), { earPerk: 1.0, tail: { sway: 1.2 } }));
+  /* the "!": body stretched tall, ears flat up, paws splayed clear of it */
+  side('held_lift', { eyes: 'wide', earPerk: 1.8, bodyY: -0.5, squash: -0.6,
+    legs: { farBack: { lift: -1 }, farFront: { x: 20.5, lift: -1 },
+            nearBack: { lift: -1 }, nearFront: { x: 24.5, lift: -1 } },
+    tail: { sway: 0.6, lift: 2.0 } });
+  /* hanging: loose paws, tail dragged straight down */
+  side('held_dangle_0', { eyes: 'open', earPerk: 1.2, bodyY: 1.2, legs: hang(-2), tail: { sway: 0 } });
+  side('held_dangle_1', { eyes: 'open', earPerk: 1.0, bodyY: 1.6, legs: hang(-2.6), tail: { sway: 0.6 } });
+  /* startled kicking: forepaws come forward, tail lashes */
+  side('held_kick_0', { eyes: 'wide', earPerk: 1.5, bodyY: 0.8,
+    legs: { farBack: { lift: -1 }, farFront: { x: 20.0, lift: 2 }, nearBack: { lift: -1 }, nearFront: { x: 24.0, lift: 2 } },
+    tail: { sway: -1.8, lift: 1.0 } });
+  side('held_kick_1', { eyes: 'wide', earPerk: 1.3, bodyY: 1.4,
+    legs: { farBack: { lift: -2 }, farFront: { x: 19.0, lift: 4 }, nearBack: { lift: -2 }, nearFront: { x: 23.0, lift: 4 } },
+    tail: { sway: 1.8, lift: 0.4 } });
+  /* settled into it: half-shut, slow breathe */
+  side('held_calm_0', { eyes: 'closed', earPerk: 0.4, bodyY: 1.2, legs: hang(-1.6), tail: { sway: 0.4 } });
+  side('held_calm_1', { eyes: 'closed', earPerk: 0.2, bodyY: 1.6, legs: hang(-2.0), tail: { sway: -0.4 } });
 
   /* turn: the bridge between the two views. A body turning is what makes
      the front and profile sprites one system instead of a hard cut, so
