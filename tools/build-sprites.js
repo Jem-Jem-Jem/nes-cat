@@ -9,16 +9,24 @@
  * frames stay literal, diffable data (see spec A-8).
  *
  *   node tools/build-sprites.js --preview   # print frames as ASCII
- *   node tools/build-sprites.js --check     # sanity-check every frame
+ *   node tools/build-sprites.js --check     # verify every frame
  *   node tools/build-sprites.js --build     # write frames.js
  *
- * Shiro is drawn in SIDE view, facing RIGHT. Sprite.draw() mirrors
- * her horizontally to face left, so every frame here is authored
- * right-facing only and never both ways.
+ * Shiro is drawn FRONT-ON. That keeps her silhouette mirror-symmetric,
+ * which is what lets one sprite read as "walking left" or "walking
+ * right" without a second set of art and without a horizontal flip.
  *
- * Layer order (back to front) is what gives the sprite its depth:
- *   tail -> far legs (shaded) -> body + near legs -> head -> face
- * Far legs sit behind the body so they never cut a seam through it.
+ * Every pose is one buildCat({...}) call. The rig parameters are:
+ *   bodyDY/headDY  nudge the torso / head vertically
+ *   squash         widen the torso (0 none, 1 fat, -1 stretched)
+ *   pawLift        raise (>0) or lower (<0) both front paws
+ *   legPhase       0..3 — which paw is up, for the walk cycle
+ *   tailSway       swing the tail sideways
+ *   tailUp         0..1 — sweep the tail up over her back
+ *   earPerk        raise the ears (interest / alarm)
+ *   eyes           open | closed | happy | wide
+ *   mouth          smile | open | pant
+ *   look           -1 glance left, +1 glance right
  * ============================================================ */
 'use strict';
 
@@ -36,11 +44,9 @@ function grid() {
 function emptyMask() {
   return Array.from({ length: H }, () => new Array(W).fill(false));
 }
-function maskOr(...ms) {
+function maskOr(a, b) {
   const m = emptyMask();
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    for (const a of ms) if (a[y][x]) { m[y][x] = true; break; }
-  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) m[y][x] = a[y][x] || b[y][x];
   return m;
 }
 function maskEllipse(cx, cy, rx, ry) {
@@ -51,11 +57,6 @@ function maskEllipse(cx, cy, rx, ry) {
     if (dx * dx + dy * dy <= 1) m[y][x] = true;
   }
   return m;
-}
-/* A leg: a short vertical capsule from `topY` down to `footY`. */
-function maskLeg(x, topY, footY, w) {
-  const cy = (topY + footY) / 2, ry = Math.max(0.5, (footY - topY) / 2);
-  return maskEllipse(x, cy, w / 2, ry);
 }
 function maskTri(ax, ay, bx, by, cx2, cy2) {
   const m = emptyMask();
@@ -85,6 +86,13 @@ function px(G, x, y, c) {
   x = Math.round(x); y = Math.round(y);
   if (x >= 0 && x < W && y >= 0 && y < H) G[y][x] = c;
 }
+function shadeBelow(G, m, cx, from, c) {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!m[y][x]) continue;
+    if (G[y][x] !== 'W') continue;
+    if (y > from) G[y][x] = c;
+  }
+}
 /* Stamp a soft 2-3px wide blob along a quadratic bezier (for the tail). */
 function stampCurve(G, p0, p1, p2, radius, fill, outline) {
   const m = emptyMask();
@@ -103,340 +111,266 @@ function stampCurve(G, p0, p1, p2, radius, fill, outline) {
   return m;
 }
 
+/* ---------- feature painters --------------------------------------- */
+
+function eyes(G, mode, dy, look) {
+  const y = 11 + dy;
+  look = look || 0;   /* -1 = glance left, +1 = glance right */
+  if (mode === 'closed') {
+    [[11, 12, 13], [18, 19, 20]].forEach(([a, b, c]) => {
+      px(G, a + look, y + 1, 'E'); px(G, b + look, y + 1, 'E'); px(G, c + look, y + 1, 'E');
+    });
+    return;
+  }
+  if (mode === 'happy') {
+    // ^ ^ arcs
+    px(G, 11 + look, y, 'E'); px(G, 12 + look, y - 1, 'E'); px(G, 13 + look, y, 'E');
+    px(G, 18 + look, y, 'E'); px(G, 19 + look, y - 1, 'E'); px(G, 20 + look, y, 'E');
+    return;
+  }
+  if (mode === 'wide') {
+    /* a taller, rounder eye — reads as startled. Pairs are mirror-matched
+     * (11 mirrors to 20, 12 to 19) or the front-on symmetry check fails. */
+    [[11, 12], [19, 20]].forEach(([a, b]) => {
+      for (let yy = y - 2; yy <= y + 1; yy++) { px(G, a + look, yy, 'E'); px(G, b + look, yy, 'E'); }
+    });
+    px(G, 11 + look, y - 2, 'W'); px(G, 20 + look, y - 2, 'W');
+    return;
+  }
+  // open: 2x3 oval with a highlight
+  [[11, 12], [19, 20]].forEach(([a, b]) => {
+    for (let yy = y - 1; yy <= y + 1; yy++) { px(G, a + look, yy, 'E'); px(G, b + look, yy, 'E'); }
+  });
+  px(G, 11 + look, y - 1, 'W');
+  px(G, 20 + look, y - 1, 'W');
+}
+
+function face(G, dy, mouth) {
+  const y = 11 + dy;
+  // nose (2px, centred on the mirror line at x=15.5)
+  px(G, 15, y + 3, 'N'); px(G, 16, y + 3, 'N');
+
+  if (mouth === 'open') {
+    /* a proper yawn / lapping gape: widen the w into an oval */
+    px(G, 14, y + 4, 'M'); px(G, 15, y + 4, 'M');
+    px(G, 16, y + 4, 'M'); px(G, 17, y + 4, 'M');
+    px(G, 15, y + 5, 'M'); px(G, 16, y + 5, 'M');
+  } else if (mouth === 'pant') {
+    /* a small tongue-ish flick, one pixel lower than the smile */
+    px(G, 15, y + 5, 'M'); px(G, 16, y + 5, 'M');
+    px(G, 16, y + 6, 'M'); px(G, 15, y + 6, 'M');
+  } else {
+    // mouth  w
+    px(G, 14, y + 4, 'M'); px(G, 15, y + 5, 'M');
+    px(G, 17, y + 4, 'M'); px(G, 16, y + 5, 'M');
+  }
+
+  // blush
+  px(G, 9, y + 2, 'B'); px(G, 10, y + 2, 'B');
+  px(G, 21, y + 2, 'B'); px(G, 22, y + 2, 'B');
+}
+
 /* ---------- the cat ------------------------------------------------- */
 
-/* Canonical rig. Every pose is this skeleton with some values nudged, so
- * new animations stay in proportion without re-deriving the whole cat.
- *
- *   FLOOR    the row her paws rest on; nothing may be drawn below it
- *   body     torso ellipse (long axis horizontal = side view)
- *   head     skull circle, set forward at the front end of the body
- *   legs     [farBack, farFront, nearBack, nearFront] each {x, lift}
- *            `lift` > 0 raises the paw (a step), < 0 lowers it
- *   tail     {sway, lift, curl} — sway pushes it back, lift raises it,
- *            curl bends the tip
- */
-const FLOOR = 29.0;
-
-const RIG = {
-  body: { x: 15.0, y: 21.0, rx: 8.5, ry: 4.8 },
-  head: { x: 22.5, y: 13.5, rx: 6.0, ry: 5.5 },
-  legs: {
-    farBack:   { x: 7.0,  lift: 0 },
-    farFront:  { x: 17.0, lift: 0 },
-    nearBack:  { x: 12.0, lift: 0 },
-    nearFront: { x: 22.0, lift: 0 }
-  },
-  tail: { sway: 0, lift: 0, curl: 0 },
-  LEG_TOP: 24.0,
-  LEG_W: 4
-};
-
-function buildCat(o) {
+/* Returns { rows, tail }. The tail mask comes back too so the checker can
+ * exempt exactly the tail instead of guessing at columns — a raised tail
+ * sits far higher than a hanging one. */
+function buildCatParts(o) {
   o = Object.assign({
-    bodyX: 0, bodyY: 0, bodyRX: null, bodyRY: null, squash: 0,
-    headDY: 0, headDX: 0,
-    legs: {}, tail: {}, earPerk: 0,
-    eyes: 'open', look: 0, mouth: 'smile', blush: false
+    bodyDY: 0, headDY: 0, squash: 0, tailSway: 0, tailUp: 0, earPerk: 0,
+    pawLift: 0, eyes: 'open', legPhase: 0, sleep: false, look: 0, mouth: 'smile'
   }, o);
 
   const G = grid();
+  /* The pixel grid spans continuum [0,32), so its mirror line is x = 16 and
+   * pixel i mirrors to pixel 31-i. Keep every shape centred on 16. */
+  const cx = 16;
 
-  const bx = RIG.body.x + o.bodyX;
-  const by = RIG.body.y + o.bodyY;
-  const bodyRX = o.bodyRX == null ? RIG.body.rx : o.bodyRX;
-  const bodyRY = (o.bodyRY == null ? RIG.body.ry : o.bodyRY) + o.squash;
-  const hx = RIG.head.x + o.headDX + o.bodyX;
-  const hy = RIG.head.y + o.headDY + o.bodyY;
-  const legTop = RIG.LEG_TOP + o.bodyY;
+  /* Layout note: the silhouette is sized so body/paws/tail bottom out at
+   * row 29-30, leaving row 31 free. Never let art touch the last row or it
+   * reads as clipped (there is no room for the bottom outline). */
 
-  /* Leg helper: a leg's foot rides `lift` px above the floor line, and its
-   * column comes from the rig (a pose may override either). `hide: true`
-   * drops the leg entirely — used by poses that tuck their paws under. */
-  const legOf = key => Object.assign({}, RIG.legs[key], o.legs[key] || {});
-  const leg = key => {
-    const L = legOf(key);
-    return maskLeg(L.x + o.bodyX, legTop, FLOOR - 1 - (L.lift || 0), RIG.LEG_W);
-  };
-  /* An empty mask for a hidden leg, so callers can still OR it in. */
-  const legShown = (key, m) => (legOf(key).hide ? emptyMask() : m);
-  const legsOf = keys => maskOr(...keys.map(k => legShown(k, leg(k))));
+  /* tail (behind body). tailUp lifts the control points so the tail sweeps
+   * up and over her back instead of hanging down beside her. */
+  const tail = stampCurve(G,
+    [21, 21 + o.bodyDY * 0.4],
+    [27.5 + o.tailSway, 22 - o.tailUp * 6],
+    [24.5 + o.tailSway, 27 - o.tailUp * 12],
+    2.0, 'W', 'K');
 
-  /* ---- tail (behind everything) ---- */
-  /* The base sits a little inside the rump so the tail always reads as
-   * attached, then arcs up and back. `lift` raises it, `curl` bends the tip. */
-  const T = Object.assign({}, RIG.tail, o.tail);
-  const tBaseX = bx - bodyRX + 2.5;
-  stampCurve(G,
-    [tBaseX, by - 0.5],
-    [tBaseX - 3.2 - T.sway, by - 1.5 - T.lift],
-    [tBaseX - 5.0 - T.sway + T.curl, by - 8.0 - T.lift * 1.6 + T.curl],
-    2.4, 'W', 'K');
+  /* body + front paws as ONE silhouette so the outline stays clean
+   * (separate outlined paws leave stray lines inside the body). */
+  const pA = o.legPhase === 1 ? -1 : 0;
+  const pB = o.legPhase === 3 ? -1 : 0;
+  /* pawLift raises (>) or lowers (<) both paws together */
+  const lift = -o.pawLift;
+  /* paws bottom out exactly with the body (y=29.0) so nothing pokes through
+   * as a stray single pixel on the row below. */
+  const pawL = maskEllipse(11.5, 27.0 + o.bodyDY + pA + lift, 2.6, 2.0);
+  const pawR = maskEllipse(20.5, 27.0 + o.bodyDY + pB + lift, 2.6, 2.0);
+  const bodyMask = maskEllipse(cx, 22.8 + o.bodyDY, 8.4, 6.2 + o.squash);
+  const bodyAll = maskOr(maskOr(bodyMask, pawL), pawR);
+  /* Flat floor: an ellipse always tapers to a 1-4px nub at the bottom, which
+   * reads as a stray pixel and moves when the body squashes. Cutting the
+   * silhouette at y=29 gives a stable, flat sitting bottom. */
+  const FLOOR = 29.0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (y + 0.5 > FLOOR) bodyAll[y][x] = false;
+  paint(G, bodyAll, 'W', 'K');
 
-  /* ---- far legs (deep shade, behind the torso) ----
-   * 'G' rather than the belly's 'H' so they still read as a separate,
-   * further-away pair instead of blending into the shaded underside. */
-  paint(G, legsOf(['farBack', 'farFront']), 'G', 'K');
+  /* head */
+  const headMask = maskEllipse(cx, 10.5 + o.headDY, 8.4, 6.5 - o.squash * 0.3);
+  paint(G, headMask, 'W', 'K');
 
-  /* ---- torso ---- */
-  const bodyMask = maskEllipse(bx, by, bodyRX, bodyRY);
-  /* An ellipse always tapers to a 1-4px nub at the bottom, which moves when
-   * the body squashes and reads as a stray pixel. Cut flat at FLOOR. */
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (y + 0.5 > FLOOR) bodyMask[y][x] = false;
-  paint(G, bodyMask, 'W', 'K');
-  shadeBelow(G, bodyMask, bx, by + 1.3, 'H');
-
-  /* ---- near legs, painted over the belly ----
-   * Kept separate (rather than merged into the torso) so each leg keeps its
-   * own outline and reads as a leg instead of a dark nub in the shading. */
-  const nearLegs = legsOf(['nearBack', 'nearFront']);
-  paint(G, nearLegs, 'W', 'K');
-
-  /* ---- head ---- */
-  const headMask = maskEllipse(hx, hy, RIG.head.rx, RIG.head.ry - o.squash * 0.25);
-  /* cheek bulge so the muzzle is not a perfect circle */
-  const cheek = maskEllipse(hx + RIG.head.rx * 0.62, hy + 1.6, 2.6, 2.4);
-  const headAll = maskOr(headMask, cheek);
-  paint(G, headAll, 'W', 'K');
-
-  /* ---- ears (on top so their outline reads) ---- */
+  /* ears (drawn on top so their outline reads). They must travel with the
+   head: headDY can push the skull right down to a bowl, and ears left at
+   their rest position would float free of it. */
   const perk = o.earPerk;
-  const earBack = maskTri(hx - 4.6, hy - 3.4 - perk, hx - 6.2, hy - 9.4 - perk, hx - 0.6, hy - 5.0);
-  const earFront = maskTri(hx + 2.2, hy - 4.0 - perk, hx + 5.6, hy - 9.2 - perk, hx + 5.4, hy - 3.6);
-  paint(G, earBack, 'W', 'K');
-  paint(G, earFront, 'W', 'K');
-  px(G, hx - 3.9, hy - 5.6 - perk, 'P');
-  px(G, hx + 3.6, hy - 5.8 - perk, 'P');
+  const hy = o.headDY;
+  const earL = maskTri(10.5, 2.0 - perk + hy, 5.2, 9.0 + hy, 14.2, 8.0 + hy);
+  const earR = maskTri(21.5, 2.0 - perk + hy, 26.8, 9.0 + hy, 17.8, 8.0 + hy);
+  paint(G, earL, 'W', 'K');
+  paint(G, earR, 'W', 'K');
+  const inL = maskTri(10.5, 4.3 - perk + hy, 7.4, 8.2 + hy, 13.0, 7.6 + hy);
+  const inR = maskTri(21.5, 4.3 - perk + hy, 24.6, 8.2 + hy, 19.0, 7.6 + hy);
+  paint(G, inL, 'P', 'P');
+  paint(G, inR, 'P', 'P');
 
-  /* ---- face ---- */
-  /* Features are placed by a fixed offset from the head centre, which on a
-   * tapered row can land outside the silhouette (a sleeping head tapers
-   * sharply). Clip every facial pixel to the head mask so a nose never
-   * floats in the background. */
-  const pxIn = (x, y, c) => {
-    const xi = Math.round(x), yi = Math.round(y);
-    if (xi < 0 || xi >= W || yi < 0 || yi >= H) return;
-    if (!headAll[yi][xi]) return;
-    G[yi][xi] = c;
-  };
-  eyes(G, hx, hy, o, pxIn);
-  face(G, hx, hy, o, pxIn);
+  /* features */
+  eyes(G, o.eyes, o.headDY, o.look);
+  face(G, o.headDY, o.mouth);
 
-  /* ---- shading: lower half of the head (torso is shaded above) ---- */
-  shadeBelow(G, headAll, hx, hy + 1.2, 'H');
+  /* shading: bottom half of head + body */
+  shadeBelow(G, headMask, cx, 12 + o.headDY, 'H');
+  shadeBelow(G, bodyAll, cx, 23 + o.bodyDY, 'H');
 
-  /* paw pads on the two near feet — only where the paw is actually on the
-   * ground, otherwise a tucked leg would print a pink dot mid-body */
-  const pad = key => {
-    const L = legOf(key);
-    if (L.hide || (L.lift || 0) > 1.5) return;
-    px(G, L.x + o.bodyX - 0.5, Math.round(FLOOR - 2 - (L.lift || 0)), 'P');
-  };
-  pad('nearBack'); pad('nearFront');
+  /* leg seam: a deeper shade line between the two front paws */
+  [26, 27, 28].forEach(y => {
+    if (G[y]) { if (G[y][15] === 'H') G[y][15] = 'G'; if (G[y][16] === 'H') G[y][16] = 'G'; }
+  });
 
-  return G.map(r => r.join(''));
+  /* paw pads — follow the paws so they never print on the belly. They are
+   * stamped directly rather than masked, so clamp them to the floor or a
+   * lowered-paw pose (carried) would print a pad on the very last row. */
+  if (!o.sleep) {
+    const py = Math.min(Math.round(27.0 + o.bodyDY + lift), 28);
+    px(G, 11, py + pA, 'P'); px(G, 12, py + pA, 'P');
+    px(G, 19, py + pB, 'P'); px(G, 20, py + pB, 'P');
+  }
+  return { rows: G.map(r => r.join('')), tail: tail };
 }
 
-/* `shadeBelow` shades interior W cells under a line — for a side view the
- * boundary follows the body's length, not a mirror axis. */
-function shadeBelow(G, m, cx, from, c) {
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    if (!m[y][x]) continue;
-    if (G[y][x] !== 'W') continue;
-    if (y > from) G[y][x] = c;
-  }
-}
-
-/* ---------- face ---------------------------------------------------- */
-
-function eyes(G, hx, hy, o, pxIn) {
-  /* One eye reads in profile; it sits just behind the muzzle bulge. */
-  const ex = Math.round(hx + 0.6 + o.look);
-  const ey = Math.round(hy - 1.0);
-
-  if (o.eyes === 'closed' || o.eyes === 'squint') {
-    const w = o.eyes === 'squint' ? 2 : 3;
-    for (let i = 0; i < w; i++) pxIn(ex - 1 + i, ey, 'E');
-    return;
-  }
-  if (o.eyes === 'happy') {
-    pxIn(ex - 1, ey + 1, 'E'); pxIn(ex, ey, 'E'); pxIn(ex + 1, ey + 1, 'E');
-    return;
-  }
-  if (o.eyes === 'wide') {
-    for (let y = ey - 1; y <= ey + 2; y++) { pxIn(ex - 1, y, 'E'); pxIn(ex, y, 'E'); }
-    pxIn(ex - 1, ey - 1, 'W');
-    return;
-  }
-  /* open: 2x3 oval with a highlight */
-  for (let y = ey - 1; y <= ey + 1; y++) { pxIn(ex - 1, y, 'E'); pxIn(ex, y, 'E'); }
-  pxIn(ex - 1, ey - 1, 'W');
-}
-
-function face(G, hx, hy, o, pxIn) {
-  const nx = Math.round(hx + RIG.head.rx * 0.82);
-  const ny = Math.round(hy + 1.0);
-
-  /* nose, then the mouth shape under it */
-  pxIn(nx, ny, 'N');
-  if (o.mouth === 'open') {
-    pxIn(nx, ny + 1, 'M'); pxIn(nx - 1, ny + 1, 'M');
-    pxIn(nx - 1, ny + 2, 'M');
-  } else if (o.mouth === 'pant') {
-    pxIn(nx, ny + 1, 'M'); pxIn(nx - 1, ny + 1, 'M');
-  } else {
-    pxIn(nx - 1, ny + 1, 'M');
-    pxIn(nx, ny + 2, 'M');
-    pxIn(nx + 1, ny + 1, 'M');
-  }
-
-  if (o.blush) {
-    pxIn(nx + 1, ny + 1, 'B');
-    pxIn(nx + 1, ny + 2, 'B');
-  }
-}
-
-/* ---------- poses --------------------------------------------------- */
-/* Each returns a partial option object layered onto the rig. */
-
-function walkPose(phase) {
-  /* A four-beat walk. Diagonal pairs swing through together and the body
-   * rises on the passing beats, so she reads as transferring weight rather
-   * than sliding. `stride` is how far a paw reaches fore/aft; a lifted paw
-   * is both forward and off the floor, which is what sells the step. */
-  const stride = 2.0;
-  const passing = (phase === 1 || phase === 3);
-  const fwd = phase === 0 ? stride : phase === 2 ? -stride : 0;
-  return {
-    bodyY: passing ? -1 : 0,
-    headDY: passing ? -0.5 : 0,
-    tail: { sway: [0.6, 1.5, 0.6, 1.1][phase] },
-    legs: {
-      nearFront: { x: 22.0 + fwd, lift: phase === 0 ? 2 : 0 },
-      farBack:   { x: 7.0 + fwd,  lift: phase === 0 ? 2 : 0 },
-      nearBack:  { x: 12.0 - fwd, lift: phase === 2 ? 2 : 0 },
-      farFront:  { x: 17.0 - fwd, lift: phase === 2 ? 2 : 0 }
-    }
-  };
+function buildCat(o) {
+  return buildCatParts(o).rows;
 }
 
 /* ---------- frame set ----------------------------------------------- */
 
 function frames() {
   const out = {};
+  const TAIL_OF = {};
 
-  /* idle */
-  out.idle_open = buildCat({ eyes: 'open' });
-  out.idle_closed = buildCat({ eyes: 'closed' });
-  out.idle_blink_mid = buildCat({ eyes: 'happy' });
-  out.idle_look_left = buildCat({ eyes: 'open', look: -1 });
-  out.idle_look_right = buildCat({ eyes: 'open', look: 1 });
-  /* breathing: she rises a little and the paws settle up with her */
-  const breatheBase = {
-    bodyY: -0.7, headDY: -0.9,
-    legs: {
-      nearBack: { lift: 0.5 }, nearFront: { lift: 0.5 },
-      farBack: { lift: 0.5 }, farFront: { lift: 0.5 }
-    }
-  };
-  out.idle_breathe = buildCat(Object.assign({}, breatheBase, { eyes: 'open' }));
-  out.idle_breathe_closed = buildCat(Object.assign({}, breatheBase, { eyes: 'closed' }));
+  /* Every frame goes through here so the tail mask is recorded alongside
+   * the art, for checkFrames() to use. */
+  function pose(name, o) {
+    const parts = buildCatParts(o);
+    out[name] = parts.rows;
+    TAIL_OF[name] = parts.tail;
+  }
 
-  /* walk */
-  for (let i = 0; i < 4; i++) out['walk_' + i] = buildCat(Object.assign({ eyes: 'open' }, walkPose(i)));
+  /* --- idle --- */
+  pose('idle_open', { eyes: 'open' });
+  pose('idle_closed', { eyes: 'closed' });
+  pose('idle_blink_mid', { eyes: 'happy' });
+  pose('idle_look_left', { eyes: 'open', look: -1 });
+  pose('idle_look_right', { eyes: 'open', look: 1 });
+  const breathe = { headDY: 0.6, pawLift: 0.5 };
+  pose('idle_breathe', Object.assign({ eyes: 'open' }, breathe));
+  pose('idle_breathe_closed', Object.assign({ eyes: 'closed' }, breathe));
 
-  /* sit — haunches down on the floor, chest and head up, back paws tucked
-   * under so only the two straight forelegs read. */
-  const sit = {
-    bodyRX: 7.5, bodyRY: 6.0, bodyY: 2.0, headDY: -2.2, headDX: -1.0,
-    tail: { sway: 2.4, lift: -2.0, curl: 1.8 },
-    legs: {
-      farBack: { hide: true }, farFront: { lift: 1 },
-      nearBack: { hide: true }, nearFront: { lift: 0 }
-    }
-  };
-  out.sit_open = buildCat(Object.assign({}, sit, { eyes: 'open' }));
-  out.sit_closed = buildCat(Object.assign({}, sit, { eyes: 'closed' }));
-
-  /* sleep — a flat loaf: wide and low, head tucked down onto the paws,
-   * ears flat, everything tucked so nothing juts out. */
-  const sleep = {
-    bodyRX: 10.0, bodyRY: 4.2, bodyY: 3.5, headDY: 2.6, headDX: 0.5,
-    earPerk: -1.0, eyes: 'closed',
-    tail: { sway: 1.4, lift: -4.0, curl: 3.0 },
-    legs: {
-      farBack: { hide: true }, farFront: { hide: true },
-      nearBack: { hide: true }, nearFront: { hide: true }
-    }
-  };
-  out.sleep_0 = buildCat(Object.assign({}, sleep));
-  out.sleep_1 = buildCat(Object.assign({}, sleep, { bodyRY: 4.6, headDY: 2.2 }));
-
-  /* react — happy hop, ears up */
-  out.react_0 = buildCat({ eyes: 'happy', earPerk: 1, bodyY: -1.4, squash: -0.5, tail: { lift: 1.5 }, legs: { nearFront: { lift: 1.2 }, nearBack: { lift: 1.2 }, farFront: { lift: 1.2 }, farBack: { lift: 1.2 } } });
-  out.react_1 = buildCat({ eyes: 'open', earPerk: 1, tail: { lift: 1.0 } });
-
-  /* jump — the vertical travel is applied by the state machine (she rises
-   * above the floor and her shadow stays down), so these frames only carry
-   * the crouch, the tuck and the stretch. */
-  const tuck = { nearFront: { lift: 3 }, farFront: { lift: 3 }, nearBack: { lift: 3 }, farBack: { lift: 3 } };
-  out.jump_0 = buildCat({ eyes: 'wide', earPerk: 1, bodyY: 1.6, squash: 0.8, legs: { nearFront: { lift: 1 }, farFront: { lift: 1 }, nearBack: { lift: 1 }, farBack: { lift: 1 } }, tail: { lift: 1 } });
-  out.jump_1 = buildCat({ eyes: 'wide', earPerk: 1, bodyY: 0.5, squash: -0.8, legs: tuck, tail: { lift: 3 } });
-  out.jump_2 = buildCat({ eyes: 'open', earPerk: 1, bodyY: -0.5, squash: -1.2, legs: { nearFront: { lift: 2 }, farFront: { lift: 2 }, nearBack: { lift: 1 }, farBack: { lift: 1 } }, tail: { lift: 2 } });
-  out.jump_3 = buildCat({ eyes: 'open', bodyY: 1.2, squash: 1.0, legs: { nearFront: { lift: 1 }, farFront: { lift: 1 } }, tail: { sway: 1.2 } });
-
-  /* eat / drink — head down at bowl height. The bowl she is at is placed by
-   * the state machine; these frames only carry the head and the chewing. */
-  const atBowl = { bodyY: 1.5, headDX: 1.5, earPerk: -0.4 };
-  out.eat_0 = buildCat(Object.assign({}, atBowl, { headDY: 6.5, mouth: 'open', eyes: 'open' }));
-  out.eat_1 = buildCat(Object.assign({}, atBowl, { headDY: 6.0, mouth: 'smile', eyes: 'closed' }));
-  out.eat_2 = buildCat(Object.assign({}, atBowl, { headDY: 6.5, mouth: 'open', eyes: 'closed' }));
-  out.drink_0 = buildCat(Object.assign({}, atBowl, { headDY: 7.6, mouth: 'open', eyes: 'open' }));
-  out.drink_1 = buildCat(Object.assign({}, atBowl, { headDY: 7.0, mouth: 'pant', eyes: 'closed' }));
-
-  /* groom — sitting up on the haunches, licking a raised forepaw */
-  const groomBase = {
-    bodyRX: 7.5, bodyRY: 6.0, bodyY: 2.0, headDX: -0.5,
-    legs: { farBack: { hide: true }, farFront: { hide: true }, nearBack: { hide: true }, nearFront: { lift: 4 } },
-    tail: { sway: 2.2, lift: -2.0, curl: 1.6 }
-  };
-  out.groom_0 = buildCat(Object.assign({}, groomBase, { headDY: 1.4, mouth: 'open', eyes: 'happy' }));
-  out.groom_1 = buildCat(Object.assign({}, groomBase, { headDY: 0.6, mouth: 'smile', eyes: 'open' }));
-
-  /* pounce — the yarn-ball lunge: coil, spring, land */
-  out.pounce_0 = buildCat({ eyes: 'wide', earPerk: 1, bodyY: 2.2, squash: 1.4, headDY: 1.0, legs: { nearFront: { lift: 2 }, farFront: { lift: 2 }, nearBack: { hide: true }, farBack: { hide: true } }, tail: { sway: -1.5, lift: 1 } });
-  out.pounce_1 = buildCat({ eyes: 'wide', earPerk: 1, bodyY: 0.5, squash: -1.0, headDX: 1.0, legs: { nearFront: { lift: 4 }, farFront: { lift: 4 }, nearBack: { lift: 3 }, farBack: { lift: 3 } }, tail: { lift: 3 } });
-  out.pounce_2 = buildCat({ eyes: 'open', earPerk: 0.5, bodyY: 1.0, headDX: 1.5, legs: { nearFront: { lift: 1 }, farFront: { lift: 1 } }, tail: { sway: 1.8 } });
-
-  /* wash — sitting, head down to a paw */
-  const washBase = {
-    bodyRX: 7.5, bodyRY: 6.0, bodyY: 2.0, headDX: -0.5,
-    legs: { farBack: { hide: true }, farFront: { hide: true }, nearBack: { hide: true }, nearFront: { lift: 3 } },
-    tail: { sway: 2.4, lift: -2.0, curl: 1.8 }
-  };
-  out.wash_0 = buildCat(Object.assign({}, washBase, { headDY: 4.2, mouth: 'open', eyes: 'closed' }));
-  out.wash_1 = buildCat(Object.assign({}, washBase, { headDY: 3.4, mouth: 'pant', eyes: 'closed' }));
-
-  /* cat tree — standing tall, batting the hanging toy */
-  out.tree_0 = buildCat({ eyes: 'open', earPerk: 1, bodyY: -1.0, headDY: -2.0, legs: { nearFront: { lift: 2 }, farFront: { lift: 2 } }, tail: { sway: 1.0, lift: 1 } });
-  out.tree_1 = buildCat({ eyes: 'happy', earPerk: 1.5, bodyY: -2.0, headDY: -3.0, legs: { nearFront: { lift: 4 }, farFront: { lift: 4 }, nearBack: { lift: 1 } }, tail: { sway: 0.5, lift: 2 } });
-
-  /* Tail-pose variants of the two idle bases. These used to be produced by a
- * separate pixel-surgery tool, but the rig can express them directly, so
- * they are ordinary frames now — same source of truth, no second file. */
-  const flick = { tail: { sway: -1.8, lift: 1.2 } };
-  const tailUp0 = { tail: { sway: 0.5, lift: 6.0, curl: 0 } };
-  const tailUp1 = { tail: { sway: 0.5, lift: 6.0, curl: 1.8 } };
-  out.idle_open_tailFlick = buildCat(Object.assign({}, flick, { eyes: 'open' }));
-  out.idle_breathe_tailFlick = buildCat(Object.assign({}, flick, breatheBase));
-  out.idle_open_tailUp0 = buildCat(Object.assign({}, tailUp0, { eyes: 'open' }));
-  out.idle_open_tailUp1 = buildCat(Object.assign({}, tailUp1, { eyes: 'open' }));
-  out.idle_breathe_tailUp0 = buildCat(Object.assign({}, tailUp0, breatheBase));
-  out.idle_breathe_tailUp1 = buildCat(Object.assign({}, tailUp1, breatheBase));
+  /* Tail-pose variants of the two idle bases. These used to come from a
+   * separate pixel-surgery tool; the rig expresses them directly, so they
+   * are ordinary frames now — same source of truth, no second file. */
+  const flick = { tailSway: -1.8, tailUp: 0.2 };
+  const tailUp0 = { tailSway: 0.5, tailUp: 0.75 };
+  const tailUp1 = { tailSway: 1.2, tailUp: 0.75 };
+  pose('idle_open_tailFlick', Object.assign({ eyes: 'open' }, flick));
+  pose('idle_breathe_tailFlick', Object.assign({ eyes: 'open' }, breathe, flick));
+  pose('idle_open_tailUp0', Object.assign({ eyes: 'open' }, tailUp0));
+  pose('idle_open_tailUp1', Object.assign({ eyes: 'open' }, tailUp1));
+  pose('idle_breathe_tailUp0', Object.assign({ eyes: 'open' }, breathe, tailUp0));
+  pose('idle_breathe_tailUp1', Object.assign({ eyes: 'open' }, breathe, tailUp1));
 
   /* a yawn, used when she is low on energy and about to nap */
-  out.idle_yawn = buildCat({ eyes: 'closed', mouth: 'open', headDY: 0.8 });
+  pose('idle_yawn', { eyes: 'closed', mouth: 'open', headDY: 0.8 });
 
+  /* --- walk: a four-beat cycle, one paw up per beat --- */
+  pose('walk_0', { legPhase: 0, bodyDY: -1, tailSway: 1.0 });
+  pose('walk_1', { legPhase: 1, bodyDY: 0, tailSway: 1.5 });
+  pose('walk_2', { legPhase: 2, bodyDY: -1, tailSway: 1.0 });
+  pose('walk_3', { legPhase: 3, bodyDY: 0, tailSway: 0.5 });
+
+  /* --- sit --- */
+  const sitBase = { squash: 0.8 };
+  pose('sit_open', Object.assign({ eyes: 'open' }, sitBase));
+  pose('sit_closed', Object.assign({ eyes: 'closed' }, sitBase));
+  /* sitting is as natural a place for a tail flourish as standing, so the
+   * sit pose needs the same variants or frameFor() cannot reuse them.
+   * Both eye states are needed: a blink can land mid-flourish, and the
+   * composed frame name is base + suffix. */
+  pose('sit_open_tailFlick', Object.assign({ eyes: 'open' }, sitBase, flick));
+  pose('sit_open_tailUp0', Object.assign({ eyes: 'open' }, sitBase, tailUp0));
+  pose('sit_open_tailUp1', Object.assign({ eyes: 'open' }, sitBase, tailUp1));
+  pose('sit_closed_tailFlick', Object.assign({ eyes: 'closed' }, sitBase, flick));
+  pose('sit_closed_tailUp0', Object.assign({ eyes: 'closed' }, sitBase, tailUp0));
+  pose('sit_closed_tailUp1', Object.assign({ eyes: 'closed' }, sitBase, tailUp1));
+
+  /* --- sleep --- */
+  pose('sleep_0', { eyes: 'closed', sleep: true, bodyDY: 1, headDY: 2, squash: 1.0, earPerk: -0.5 });
+  pose('sleep_1', { eyes: 'closed', sleep: true, bodyDY: 1, headDY: 1.5, squash: 1.4, earPerk: -0.5 });
+
+  /* --- react (petted / played with) --- */
+  pose('react_0', { eyes: 'happy', earPerk: 1, bodyDY: -1, squash: -0.4 });
+  pose('react_1', { eyes: 'open', earPerk: 1, squash: 0 });
+
+  /* --- held: she is dangling from a hand. The state machine keeps cycling
+   * these while she is carried so she is never a frozen sprite. --- */
+  pose('held_0', { eyes: 'wide', earPerk: 1.2, bodyDY: 1.2, pawLift: -1.5, tailSway: 0 });
+  pose('held_1', { eyes: 'wide', earPerk: 1.2, bodyDY: 1.6, pawLift: -2.2, tailSway: -1.2 });
+  pose('held_2', { eyes: 'wide', earPerk: 1.0, bodyDY: 1.2, pawLift: -1.5, tailSway: 1.2 });
+
+  /* --- jump: the vertical travel is the state machine's job, these frames
+   * carry the crouch, the tuck and the stretch. --- */
+  pose('jump_0', { eyes: 'wide', earPerk: 1, bodyDY: 1.4, squash: 1.0 });
+  pose('jump_1', { eyes: 'wide', earPerk: 1.2, bodyDY: -0.5, squash: -0.6, pawLift: 3, tailUp: 0.5 });
+  pose('jump_2', { eyes: 'open', earPerk: 1.2, bodyDY: -1.0, squash: -1.0, pawLift: 2.5, tailUp: 0.4 });
+  pose('jump_3', { eyes: 'open', bodyDY: 0.8, squash: 0.9, pawLift: 0.5 });
+
+  /* --- eat / drink: head down at bowl height. Where the bowl is, is the
+   * state machine's job; these frames carry the head and the chewing. --- */
+  const atBowl = { bodyDY: 1.0, pawLift: 0.5 };
+  pose('eat_0', Object.assign({ eyes: 'open', mouth: 'open', headDY: 6.0 }, atBowl));
+  pose('eat_1', Object.assign({ eyes: 'closed', mouth: 'smile', headDY: 5.5 }, atBowl));
+  pose('eat_2', Object.assign({ eyes: 'closed', mouth: 'open', headDY: 6.0 }, atBowl));
+  pose('drink_0', Object.assign({ eyes: 'open', mouth: 'open', headDY: 7.0 }, atBowl));
+  pose('drink_1', Object.assign({ eyes: 'closed', mouth: 'pant', headDY: 6.5 }, atBowl));
+
+  /* --- groom / wash: sitting, head down to a raised paw --- */
+  const seated = { squash: 1.0, bodyDY: 1.2, pawLift: 3.5, tailUp: 0.3 };
+  pose('groom_0', Object.assign({ eyes: 'happy', mouth: 'open', headDY: 2.4 }, seated));
+  pose('groom_1', Object.assign({ eyes: 'open', mouth: 'smile', headDY: 1.8 }, seated));
+  pose('wash_0', Object.assign({ eyes: 'closed', mouth: 'open', headDY: 3.6 }, seated));
+  pose('wash_1', Object.assign({ eyes: 'closed', mouth: 'pant', headDY: 3.0 }, seated));
+
+  /* --- pounce: the yarn-ball lunge --- */
+  pose('pounce_0', { eyes: 'wide', earPerk: 1.2, bodyDY: 1.8, squash: 1.4, tailUp: 0.4 });
+  pose('pounce_1', { eyes: 'wide', earPerk: 1.4, bodyDY: -0.5, squash: -0.8, pawLift: 3.5, tailUp: 0.8 });
+  pose('pounce_2', { eyes: 'open', earPerk: 0.8, bodyDY: 0.8, squash: 0.8, pawLift: 0.5, tailSway: 1.4 });
+
+  /* --- cat tree: standing tall, batting the hanging toy --- */
+  pose('tree_0', { eyes: 'open', earPerk: 1.2, bodyDY: -0.6, pawLift: 2, tailUp: 0.3 });
+  pose('tree_1', { eyes: 'happy', earPerk: 1.6, bodyDY: -1.2, pawLift: 4, tailUp: 0.6 });
+
+  TAIL_MASKS = TAIL_OF;
   return out;
 }
 
@@ -446,39 +380,57 @@ function toAscii(rows) {
   return rows.map((r, i) => String(i).padStart(2, '0') + ' ' + r).join('\n');
 }
 
+let TAIL_MASKS = {};   /* filled in by frames() */
+
 const mode = process.argv[2] || '--preview';
 const F = frames();
 
-/* Sanity check. A side view has no mirror symmetry to preserve — instead we
- * assert the things that would actually clip or float:
- *   - every frame is exactly 32x32
- *   - nothing on the last row (she would read as cropped)
- *   - nothing in the last column (Sprite.draw mirrors her to face left, so
- *     art touching column 31 would be cut off on the facing-left pass)
- *   - some art actually exists
+/* Mechanical verification.
+ *
+ * Because she is front-on, every frame should mirror — that is the whole
+ * reason for this view. The exemptions are all deliberate and precise:
+ *   tail pixels  read from the exact mask the builder stamped
+ *   walk_*       the walk cycle alternates one paw at a time
+ *   *_look_*     a deliberate eye glance off the mirror line
+ *   groom/wash   one paw is raised, which is the point of the pose
  */
 function checkFrames() {
   let bad = 0;
-  const fail = m => { bad++; if (bad <= 12) console.log('BAD ' + m); };
-
   Object.keys(F).forEach(k => {
     const rows = F[k];
-    if (rows.length !== H) return fail(k + ': ' + rows.length + ' rows');
-    let ink = 0;
-    rows.forEach((row, y) => {
-      if (row.length !== W) return fail(k + ' row ' + y + ': ' + row.length + ' cols');
+    if (rows.length !== H) { bad++; console.log('BAD ' + k + ': ' + rows.length + ' rows'); return; }
+
+    const tail = TAIL_MASKS[k];
+    const walking = k.indexOf('walk') === 0;
+    const looking = k.indexOf('look') >= 0;
+    const onePaw = k.indexOf('groom') === 0 || k.indexOf('wash') === 0;
+
+    for (let y = 0; y < H; y++) {
+      const row = rows[y];
+      if (row.length !== W) { bad++; console.log('BAD ' + k + ' row ' + y + ': ' + row.length + ' cols'); continue; }
       for (let x = 0; x < W; x++) {
         if (row[x] === '.') continue;
-        ink++;
-        if (y === H - 1) fail(k + ': art on the last row (row ' + y + ')');
-        if (x === W - 1) fail(k + ': art in the last column (col ' + x + ')');
+        if (y === H - 1) { bad++; console.log('BAD ' + k + ': art on the last row'); }
+
+        if (tail && tail[y][x]) continue;                               /* the tail */
+        if (walking && y >= 26) continue;                                /* alternating paw */
+        if (looking) continue;                                           /* eye glance */
+        if (onePaw) continue;                                            /* one paw raised */
+
+        if (row[x] !== row[W - 1 - x]) {
+          bad++;
+          if (bad <= 12) {
+            console.log('ASYM ' + k + ' row ' + y + ' col ' + x + ': ' +
+              row[x] + ' vs ' + row[W - 1 - x]);
+          }
+        }
       }
-    });
-    if (ink === 0) fail(k + ': frame is empty');
+    }
   });
 
   console.log(bad === 0
-    ? 'FRAME CHECK OK — ' + Object.keys(F).length + ' frames, 32x32, clear of the flip edge'
+    ? 'FRAME CHECK OK — ' + Object.keys(F).length +
+      ' frames, 32x32, mirror-symmetric outside the exempt zones'
     : 'FRAME CHECK FAIL — ' + bad + ' problems');
   return bad;
 }
@@ -489,7 +441,7 @@ if (mode === '--check') {
   const lines = [];
   lines.push('/* ============================================================');
   lines.push(' * NES-cat — frames.js');
-  lines.push(' * Literal 32x32 pixel frames for Shiro (side view, facing right).');
+  lines.push(' * Literal 32x32 pixel frames for Shiro (front view).');
   lines.push(' *');
   lines.push(' * GENERATED by tools/build-sprites.js — edit the tool, not this file.');
   lines.push(' *');
