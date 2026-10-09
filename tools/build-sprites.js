@@ -307,9 +307,32 @@ const SIDE_RIG = {
   LEG_W: 4
 };
 
-/* In profile only one eye shows, and features hang off the head centre
-   rather than the frame's mirror line — so these need their own painters. */
+/* In profile only one eye shows. During a turn she is coming back toward
+   the viewer and the second eye starts to appear, foreshortened — that is
+   what sells the rotation. `twoEyes` switches to the paired layout. */
 function eyesSide(G, hx, hy, o, pxIn) {
+  if (o.twoEyes) {
+    const ey = Math.round(hy - 1.0);
+    /* the far eye is one pixel narrower, as it turns away */
+    if (o.eyes === 'closed') {
+      for (let i = 0; i < 2; i++) { pxIn(hx - 3 + i, ey, 'E'); pxIn(hx + 2 + i, ey, 'E'); }
+      return;
+    }
+    if (o.eyes === 'happy') {
+      pxIn(hx - 3, ey + 1, 'E'); pxIn(hx - 2, ey, 'E');
+      pxIn(hx + 2, ey + 1, 'E'); pxIn(hx + 3, ey, 'E');
+      return;
+    }
+    const rows = o.eyes === 'wide' ? 4 : 3;
+    const off = o.eyes === 'wide' ? 1 : 0;
+    for (let y = ey - 1 - off; y <= ey + (rows - 2) - off; y++) {
+      pxIn(hx - 3, y, 'E');
+      pxIn(hx + 2, y, 'E'); pxIn(hx + 3, y, 'E');
+    }
+    if (!off) { pxIn(hx - 3, ey - 1, 'W'); pxIn(hx + 2, ey - 1, 'W'); }
+    return;
+  }
+
   const ex = Math.round(hx + 0.6 + o.look);
   const ey = Math.round(hy - 1.0);
 
@@ -352,7 +375,7 @@ function faceSide(G, hx, hy, o, pxIn) {
 function buildSideParts(o) {
   o = Object.assign({
     bodyX: 0, bodyY: 0, bodyRX: null, bodyRY: null, squash: 0,
-    headDY: 0, headDX: 0,
+    headDY: 0, headDX: 0, twoEyes: false,
     legs: {}, tail: {}, earPerk: 0,
     eyes: 'open', look: 0, mouth: 'smile', blush: false
   }, o);
@@ -623,6 +646,30 @@ function frames() {
   side('held_0', Object.assign(dangling(-2), { tail: { sway: 0 } }));
   side('held_1', Object.assign(dangling(-3), { bodyY: 1.8, earPerk: 1.4, tail: { sway: -1.2 } }));
   side('held_2', Object.assign(dangling(-2), { earPerk: 1.0, tail: { sway: 1.2 } }));
+
+  /* turn: the bridge between the two views. A body turning is what makes
+     the front and profile sprites one system instead of a hard cut, so
+     these sit between a front pose and a profile pose: the skull swings
+     back over the shoulders and the torso narrows as she comes round.
+     Authored turning to the right; the flip handles the other way. */
+  /* stand: at rest in profile. The anchor on the profile side of a turn, and
+     * what she holds while watching something without walking to it. */
+  side('stand_0', { eyes: 'open', bodyY: 0 });
+  side('stand_1', { eyes: 'open', bodyY: -0.6, headDY: -0.7, legs: {
+    farBack: { lift: 0.5 }, farFront: { lift: 0.5 }, nearBack: { lift: 0.5 }, nearFront: { lift: 0.5 } } });
+
+  /* turn: the bridge between the two views. A body turning is what makes
+     * the front and profile sprites one system instead of a hard cut, so
+     * these sit between a front pose and a profile pose: the torso rounds
+     * off toward the viewer, the skull swings back over the shoulders and
+     * the second eye appears. Authored turning to the right; the flip
+     * handles the other way. */
+  side('turn_1', { eyes: 'open', twoEyes: true, headDX: -5.0, bodyRX: 8.2, bodyRY: 6.0,
+    legs: { farBack: { x: 9.0 }, farFront: { x: 17.5 }, nearBack: { x: 13.0 }, nearFront: { x: 20.5 } },
+    tail: { sway: 0.4, lift: -2.4 } });
+  side('turn_2', { eyes: 'open', twoEyes: true, headDX: -2.0, bodyRX: 8.4, bodyRY: 5.2,
+    legs: { farBack: { x: 8.0 }, farFront: { x: 17.0 }, nearBack: { x: 12.5 }, nearFront: { x: 21.0 } },
+    tail: { sway: 0.2, lift: -1.6 } });
 
   TAIL_MASKS = TAIL_OF;
   return out;

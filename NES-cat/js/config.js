@@ -80,6 +80,7 @@
        * idle flourishes (glance, tail flick, yawn) to be visible at all. */
       wSit: 62,
       wGroom: 16,
+      wWatch: 22,
       wWash: 12,
       wTree: 18,
       wYarn: 20,
@@ -91,7 +92,14 @@
 
       /* how high she can be lifted when picked up (logical px above the
        * floor); keeps a drag from dragging her off the top of the room */
-      carryLiftMax: 64
+      carryLiftMax: 64,
+
+      /* the rotation between the front and profile views. turnDur spans the
+       * from-pose, both three-quarter frames and the hand-off, so ~0.45s
+       * reads as a deliberate pivot rather than a flicker. */
+      turnDur: 0.45,
+      /* how long she stands looking at something after turning to profile */
+      watchDur: 2.6
     },
 
     /* --- meters (all 0..1) -------------------------------------------- */

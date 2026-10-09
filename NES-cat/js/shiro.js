@@ -85,9 +85,12 @@
         }
       },
       walk: {
-        enter: function () {
-          self._targetX = U.rand(NESCAT.Scene.WALK_MIN_X, NESCAT.Scene.WALK_MAX_X);
+        enter: function (payload) {
+          self._targetX = (payload && payload.x != null)
+            ? payload.x
+            : U.rand(NESCAT.Scene.WALK_MIN_X, NESCAT.Scene.WALK_MAX_X);
           self._walkDur = U.rand(B.walkMin, B.walkMax);
+          self._walkFromSide = !!payload && payload.fromSide;
         },
         update: function (dt, s) {
           var dx = self._targetX - self.x;
@@ -255,6 +258,77 @@
           }
           if (p >= 1) { self._lift = 0; sm.set('idle'); }
         }
+      },
+
+      /* ---------- turning -------------------------------------------------
+       *
+       * The two sprite views only cohere if the rotation between them is
+       * animated — otherwise every change of view is a pop. `turn` plays the
+       * bridge: a front pose, then the two three-quarter frames, then a
+       * profile pose (and the same in reverse coming back).
+       *
+       * The bridge frames are profile art authored facing right, so the
+       * whole sequence mirrors together when she turns left. `facing` is
+       * pinned on entry so the flip cannot change mid-turn.
+       */
+
+      turn: {
+        enter: function (payload) {
+          var p = payload || {};
+          var to = p.to === 'front' ? 'front' : 'side';
+          self._turn = {
+            to: to,
+            from: p.from || (to === 'side' ? 'idle_open' : 'side_stand_0'),
+            dur: B.turnDur,
+            then: p.then || 'idle'
+          };
+          /* the whole sequence mirrors together, so decide direction once */
+          if (p.facing) self.facing = p.facing;
+        },
+        update: function (dt, s) {
+          if (s.time < self._turn.dur) return;
+          sm.set(self._turn.then);
+        }
+      },
+
+      /* watch: she turns her body to look at something and stands there,
+       * without walking over to it. This is the turn as an activity in its
+       * own right, and the reason the profile view earns its keep on a cat
+       * who is not moving. */
+      watch: {
+        enter: function () {
+          self._act = { dur: B.watchDur, phase: 'out' };
+          self._turn = { to: 'side', from: 'idle_open', dur: B.turnDur, then: 'watch' };
+          self.facing = U.chance(0.5) ? 1 : -1;
+        },
+        update: function (dt, s) {
+          if (self._act.phase === 'out') {
+            if (s.time < B.turnDur) return;
+            self._act.phase = 'hold';
+            self._sm.time = 0;
+            return;
+          }
+          if (self._act.phase === 'hold') {
+            if (s.time > self._act.dur) {
+              self._act.phase = 'back';
+              self._sm.time = 0;
+              self._turn = { to: 'front', from: 'side_stand_0', dur: B.turnDur, then: 'idle' };
+            }
+            return;
+          }
+          if (s.time >= B.turnDur) sm.set('idle');
+        }
+      },
+
+      /* resume: hand control back to the activity that paused to pivot. Its
+       * _act (target, arrived flag, phase) is untouched, so it carries on
+       * from where it stopped rather than restarting its approach. */
+      resume: {
+        update: function () {
+          var to = self._resumeTo || 'idle';
+          self._resumeTo = null;
+          sm.set(to);
+        }
       }
     };
 
@@ -267,7 +341,12 @@
 
   /* Walk toward a fixture until she is close enough to act on it.
    Returns true once arrived (and latches, so the caller can then run its
-   performance phase without re-walking every frame). */
+   performance phase without re-walking every frame).
+
+   Approaching a bowl means crossing the room in profile, so if she is still
+   front-on she pivots first. Dropping straight into a walk frame would pop
+   the view, and a cat that slides off in profile with no pivot reads as a
+   sprite swap rather than a cat leaving. */
   Shiro.arrive = function (dt, targetX, s) {
     if (this._act.arrived) return true;
     var dx = targetX - this.x;
@@ -275,8 +354,17 @@
       this._act.arrived = true;
       return true;
     }
-    /* face the way she is travelling so the walk cycle reads correctly */
-    this.facing = dx < 0 ? -1 : 1;
+    var dir = dx < 0 ? -1 : 1;
+    this.facing = dir;
+    /* one pivot on the way out, not on every frame */
+    if (!this._act.turned) {
+      this._act.turned = true;
+      if (!this.isSide()) {
+        this._resumeTo = this._sm.state;
+        this._turn = { to: 'side', from: 'idle_open', dur: CFG.BEHAVIOR.turnDur, then: 'resume' };
+        return false;
+      }
+    }
     this.x += Math.sign(dx) * CFG.BEHAVIOR.approachSpeed * dt;
     this._bob += dt * 11;
     return false;
@@ -314,6 +402,8 @@
      * climbs past the threshold (and only if the bowl is not empty). */
     if (this.meters.hunger > B.hungryBelow && Sc.food > 0.05) pool.push(['eat', 30]);
     else pool.push(['groom', B.wGroom]);
+    /* turning to look at something without walking over to it */
+    pool.push(['watch', B.wWatch]);
     if (this.meters.energy > 0.3) pool.push(['wash', B.wWash]);
     if (Sc.water > 0.05) pool.push(['drink', 18]);
     if (Math.abs(this.x - Sc.CAT_TREE_X) < B.treeNearX) pool.push(['tree', B.wTree]);
@@ -331,6 +421,7 @@
 
     if (kind === 'sit') { this._sm.set('sit'); return; }
     if (kind === 'pounce') { this._sm.set('pounce'); return; }
+    if (kind === 'watch') { this._sm.set('watch'); return; }
 
     /* stays put: point her at the fixture and let the state walk her over */
     if (kind === 'eat') this._sm.set('eat', { from: null });
@@ -591,6 +682,12 @@
     return (f && f[name]) ? name : fallback;
   };
 
+  /* The two three-quarter poses, in order, per direction of rotation. */
+  Shiro.TURN_MID = {
+    side:  ['side_turn_1', 'side_turn_2'],
+    front: ['side_turn_2', 'side_turn_1']
+  };
+
   /* ---------- which view she is drawn in -------------------------------
  *
  * The two sprite views are one system, split by what the pose has to show.
@@ -610,13 +707,15 @@
  * prefix by the build tool, authored facing right and mirrored at draw time. */
   Shiro.SIDE_STATES = {
     walk: 1, jump: 1, pounce: 1,
-    eat: 1, drink: 1, groom: 1, wash: 1, tree: 1
+    eat: 1, drink: 1, groom: 1, wash: 1, tree: 1,
+    turn: 1, watch: 1
   };
 
+  /* Whether the frame she is about to draw is profile art. Kept as a
+   * helper because the view is now decided per frame, not per state. */
   Shiro.isSide = function () {
-    /* being carried reads best in profile too (loose paws, dragging tail) */
     if (this.dragging) return true;
-    return !!Shiro.SIDE_STATES[this._sm.state];
+    return this.frameFor().indexOf('side_') === 0;
   };
 
   Shiro.frameFor = function () {
@@ -641,6 +740,37 @@
 
     if (st === 'sleep') return (Math.sin(this._bob) > 0) ? 'sleep_0' : 'sleep_1';
     if (st === 'react') return (t < 0.16) ? 'react_0' : 'react_1';
+    /* The rotation itself: hold the pose we are leaving, step through the two
+     * three-quarter frames, and let the destination state draw its first
+     * frame. The `from` anchor only shows briefly — at this size the motion
+     * between the bridge frames is what reads. */
+    if (st === 'turn') {
+      var tp = U.clamp(t / (self._turn.dur || 1), 0, 1);
+      var mid = Shiro.TURN_MID[self._turn.to] || Shiro.TURN_MID.side;
+      if (tp < 0.4) return self.pickFrame(self._turn.from, mid[0]);
+      if (tp < 0.72) return mid[0];
+      return mid[1];
+    }
+    if (st === 'watch') {
+      /* out: same progression as a turn — front pose, both bridge frames,
+         then the profile hold. Holding the starting pose briefly is what
+         makes it read as a pivot rather than a cut. */
+      if (self._act.phase === 'out') {
+        var op = U.clamp(t / Bh.turnDur, 0, 1);
+        if (op < 0.4) return self.pickFrame('idle_open', 'side_turn_1');
+        if (op < 0.72) return 'side_turn_1';
+        return 'side_turn_2';
+      }
+      if (self._act.phase === 'hold') {
+        return (Math.sin(t * 2.4) > 0) ? 'side_stand_0' : 'side_stand_1';
+      }
+      /* back: the same bridge, reversed */
+      var bp = U.clamp(t / Bh.turnDur, 0, 1);
+      if (bp < 0.4) return 'side_turn_2';
+      if (bp < 0.72) return 'side_turn_1';
+      return 'idle_open';
+    }
+
     /* travelling states are drawn in profile */
     if (st === 'walk') return 'side_walk_' + (Math.floor(t * 7) % 4);
 
@@ -717,13 +847,18 @@
     var ambient = light ? light.ambient : null;
     var amt = light ? light.ambientAmt : 0;
 
-    /* She has two views. The front view is symmetric, so it must NOT be
-     * flipped — mirroring it would only throw the tail to the other side.
-     * The profile view is authored facing right and is mirrored to face the
-     * way she is travelling. Mid-air the shadow stays on the floor and
-     * shrinks, which is what sells the height. */
+    /* The front view is symmetric, so it must NOT be flipped — mirroring it
+     * would only throw the tail to the other side. Rather than track which
+     * view each state happens to be on (and get it wrong the moment a turn
+     * starts or ends), ask the frame itself: anything authored in profile
+     * carries the side_ prefix. That also covers a turn, which is profile
+     * art at both ends with a front pose in the middle.
+     *
+     * Mid-air the shadow stays on the floor and shrinks, which is what sells
+     * the height. */
     var lift = this._lift || 0;
     var air = U.clamp(lift / 26, 0, 1);
+    var frame = this.frameFor();
 
     g.noStroke();
     g.fill(0, 0, 0, Math.round(60 * (1 - air * 0.55)));
@@ -733,10 +868,10 @@
     /* particles behind the cat if they are "above" her */
     this.drawParticles(g, false);
 
-    NESCAT.Sprite.draw(g, this.sprite, this.frameFor(), this.x, this.y - lift, {
+    NESCAT.Sprite.draw(g, this.sprite, frame, this.x, this.y - lift, {
       ambient: ambient,
       ambientAmt: amt,
-      flip: this.isSide() && this.facing < 0
+      flip: this.facing < 0 && frame.indexOf('side_') === 0
     });
 
     this.drawParticles(g, true);
