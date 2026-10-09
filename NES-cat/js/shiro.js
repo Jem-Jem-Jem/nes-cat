@@ -329,6 +329,33 @@
           self._resumeTo = null;
           sm.set(to);
         }
+      },
+
+      /* ---------- idle variety ------------------------------------------
+       * Flourishes are overlays on one pose. These are whole different
+       * postures she settles into while awake and still, which is what
+       * stops "idle" from looking like a single loop. Both are front view —
+       * she is facing you and staying there. */
+
+      /* the long stretch: spine uncoiling, rump up, then easing back */
+      stretch: {
+        enter: function () {
+          self._act = { dur: B.stretchDur };
+          if (self.onSay && U.chance(0.4)) self.onSay('idle');
+        },
+        update: function (dt, s) {
+          if (s.time > self._act.dur) sm.set('idle');
+        }
+      },
+
+      /* loaf: tucking into a compact oval with her head down on her paws */
+      loaf: {
+        enter: function () {
+          self._act = { dur: B.loafDur };
+        },
+        update: function (dt, s) {
+          if (s.time > self._act.dur) sm.set('idle');
+        }
       }
     };
 
@@ -404,6 +431,9 @@
     else pool.push(['groom', B.wGroom]);
     /* turning to look at something without walking over to it */
     pool.push(['watch', B.wWatch]);
+    /* idle postures: a stretch and a loaf are different from sitting */
+    pool.push(['stretch', B.wStretch]);
+    if (this.meters.energy > 0.45) pool.push(['loaf', B.wLoaf]);
     if (this.meters.energy > 0.3) pool.push(['wash', B.wWash]);
     if (Sc.water > 0.05) pool.push(['drink', 18]);
     if (Math.abs(this.x - Sc.CAT_TREE_X) < B.treeNearX) pool.push(['tree', B.wTree]);
@@ -422,6 +452,8 @@
     if (kind === 'sit') { this._sm.set('sit'); return; }
     if (kind === 'pounce') { this._sm.set('pounce'); return; }
     if (kind === 'watch') { this._sm.set('watch'); return; }
+    if (kind === 'stretch') { this._sm.set('stretch'); return; }
+    if (kind === 'loaf') { this._sm.set('loaf'); return; }
 
     /* stays put: point her at the fixture and let the state walk her over */
     if (kind === 'eat') this._sm.set('eat', { from: null });
@@ -802,6 +834,20 @@
     if (st === 'groom') return (Math.sin(t * 2.2) > 0) ? 'side_groom_0' : 'side_groom_1';
     if (st === 'wash') return (Math.sin(t * 2.6) > 0) ? 'side_wash_0' : 'side_wash_1';
     if (st === 'tree') return (Math.sin(t * 1.9) > 0) ? 'side_tree_0' : 'side_tree_1';
+
+    /* stretch: arch, hold, ease back. Timed so the hold is the longest
+       * beat — the pose itself is the point, not the motion into it. */
+    if (st === 'stretch') {
+      var d = Bh.stretchDur;
+      if (t < d * 0.30) return 'stretch_0';
+      if (t < d * 0.68) return 'stretch_1';
+      if (t < d) return 'stretch_2';
+    }
+
+    /* loaf: just breathing, until she decides to unfold */
+    if (st === 'loaf') {
+      return (Math.sin(t * 1.7) > 0) ? 'loaf_0' : 'loaf_1';
+    }
 
     var breathing = Math.sin(this._bob) > 0.55;
     var blink = this.blinkAt();

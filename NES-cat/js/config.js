@@ -102,8 +102,14 @@
        * from-pose, both three-quarter frames and the hand-off, so ~0.45s
        * reads as a deliberate pivot rather than a flicker. */
       turnDur: 0.45,
-      /* how long she stands looking at something after turning to profile */
-      watchDur: 2.6
+      /* how long she stays turned, and the idle postures. A stretch is mostly
+       * hold — the pose is the point, not the motion into it — while a
+       * loaf is a long settle with nothing to do. */
+      watchDur: 2.6,
+      stretchDur: 1.7,
+      loafDur: 5.5,
+      wStretch: 18,
+      wLoaf: 14
     },
 
     /* --- meters (all 0..1) -------------------------------------------- */

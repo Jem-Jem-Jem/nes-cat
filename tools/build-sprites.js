@@ -184,7 +184,7 @@ function face(G, dy, mouth) {
  * sits far higher than a hanging one. */
 function buildCatParts(o) {
   o = Object.assign({
-    bodyDY: 0, headDY: 0, squash: 0, tailSway: 0, tailUp: 0, earPerk: 0,
+    bodyDY: 0, headDY: 0, squash: 0, bodyRX: null, tailSway: 0, tailUp: 0, earPerk: 0,
     pawLift: 0, eyes: 'open', legPhase: 0, sleep: false, look: 0, mouth: 'smile'
   }, o);
 
@@ -215,7 +215,9 @@ function buildCatParts(o) {
    * as a stray single pixel on the row below. */
   const pawL = maskEllipse(11.5, 27.0 + o.bodyDY + pA + lift, 2.6, 2.0);
   const pawR = maskEllipse(20.5, 27.0 + o.bodyDY + pB + lift, 2.6, 2.0);
-  const bodyMask = maskEllipse(cx, 22.8 + o.bodyDY, 8.4, 6.2 + o.squash);
+  /* bodyRX widens the torso — a stretch is wide and low, a loaf is compact */
+  const brx = o.bodyRX == null ? 8.4 : o.bodyRX;
+  const bodyMask = maskEllipse(cx, 22.8 + o.bodyDY, brx, 6.2 + o.squash);
   const bodyAll = maskOr(maskOr(bodyMask, pawL), pawR);
   /* Flat floor: an ellipse always tapers to a 1-4px nub at the bottom, which
    * reads as a stray pixel and moves when the body squashes. Cutting the
@@ -560,6 +562,20 @@ function frames() {
   /* --- react (petted / played with) --- */
   pose('react_0', { eyes: 'happy', earPerk: 1, bodyDY: -1, squash: -0.4 });
   pose('react_1', { eyes: 'open', earPerk: 1, squash: 0 });
+
+  /* --- stretch: the long cat stretch, rump up and front paws forward. The
+   * torso goes wide and low and the head lifts, which is what reads as a
+   * spine uncoiling rather than a squash. --- */
+  const stretchA = { bodyRX: 9.7, squash: -0.9, headDY: -2.2, tailUp: 0.9, earPerk: -0.4, eyes: 'closed' };
+  pose('stretch_0', Object.assign({}, stretchA));
+  pose('stretch_1', Object.assign({}, stretchA, { bodyRX: 9.9, squash: -0.5, headDY: -1.7 }));
+  pose('stretch_2', Object.assign({}, stretchA, { bodyRX: 8.9, squash: 0.3, headDY: -0.7, tailUp: 0.4 }));
+
+  /* --- loaf: settling into a compact oval with her head down on her paws,
+   * the way a cat conserves heat. The opposite of the stretch. --- */
+  const loafA = { bodyRX: 9.3, squash: 1.9, headDY: 2.3, tailUp: 0.6, earPerk: -0.5, eyes: 'closed' };
+  pose('loaf_0', Object.assign({}, loafA));
+  pose('loaf_1', Object.assign({}, loafA, { squash: 2.2, headDY: 2.5 }));
 
   /* Everything below this line moved to the profile rig: held, jump, eat,
    * drink, groom, wash, pounce and tree are all poses where what matters is
