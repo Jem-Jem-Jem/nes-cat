@@ -1,0 +1,6 @@
+# browser-automation scratch (playwright-cli)
+.playwright-cli/
+
+# node
+node_modules/
+
