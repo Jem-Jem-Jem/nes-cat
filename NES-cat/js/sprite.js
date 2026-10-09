@@ -106,6 +106,10 @@
           sm.state = name;
           sm.time = 0;
           var nxt = spec[name];
+          /* enter(sm, from, payload) — three arguments, in that order. A
+             state that only needs the payload must declare all three, or it
+             silently receives the state machine instead and anything it
+             reads off the payload comes back undefined. */
           if (nxt && nxt.enter) nxt.enter(sm, sm.previous, payload || {});
         },
 

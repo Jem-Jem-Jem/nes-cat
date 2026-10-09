@@ -86,20 +86,23 @@
       },
       walk: {
         enter: function (payload) {
-          self._targetX = (payload && payload.x != null)
-            ? payload.x
-            : U.rand(NESCAT.Scene.WALK_MIN_X, NESCAT.Scene.WALK_MAX_X);
+          /* startWalk() chose the destination and the facing before the
+             pivot, so the turn and the walk agree on which way she goes */
+          var pending = self._pendingWalk;
+          self._pendingWalk = null;
+          self._targetX = (payload && payload.x != null) ? payload.x
+            : (pending != null ? pending
+              : U.rand(NESCAT.Scene.WALK_MIN_X, NESCAT.Scene.WALK_MAX_X));
           self._walkDur = U.rand(B.walkMin, B.walkMax);
           self._walkStartX = self.x;   /* the stride is measured from here */
         },
         update: function (dt, s) {
           var dx = self._targetX - self.x;
           var speed = 26;                     /* logical px/s */
-          if (Math.abs(dx) < 1.5) { sm.set('idle'); return; }
-          self.facing = dx < 0 ? -1 : 1;
+          if (Math.abs(dx) < 1.5) { self.endWalk(); return; }
           self.x += Math.sign(dx) * speed * dt;
           self._bob += dt * 11;
-          if (s.time > self._walkDur + 1.5) sm.set('idle');
+          if (s.time > self._walkDur + 1.5) self.endWalk();
         }
       },
       sit: {
@@ -128,7 +131,7 @@
         }
       },
       react: {
-        enter: function (payload) {
+        enter: function (sm, from, payload) {
           self._reactDur = U.rand(B.reactMin, B.reactMax);
           self._squashV = -14;
           /* a pet/drag/play cancels whatever she was doing — including
@@ -273,7 +276,7 @@
        */
 
       turn: {
-        enter: function (payload) {
+        enter: function (sm, from, payload) {
           var p = payload || {};
           var to = p.to === 'front' ? 'front' : 'side';
           self._turn = {
@@ -339,10 +342,11 @@
 
       /* the long stretch: spine uncoiling, rump up, then easing back */
       stretch: {
-        enter: function (payload) {
+        enter: function (sm, from, payload) {
+          var p = payload || {};
           self._act = { dur: B.stretchDur };
           /* waking stretches, and then says something about it */
-          if (payload && payload.fromSleep) {
+          if (p.fromSleep) {
             if (self.onSay) self.onSay('wake');
           } else if (self.onSay && U.chance(0.4)) {
             self.onSay('idle');
@@ -450,6 +454,31 @@
     this.facing = 1;
   };
 
+  /* Set off on foot. Picks the destination, pins her facing to it, and
+   * pivots into profile first if she is still front-on — walking is the
+   * most common transition in the piece, so it is the one that must not
+   * hard-cut between the two views. */
+  Shiro.startWalk = function (targetX) {
+    var Sc = NESCAT.Scene;
+    var t = targetX != null ? targetX : U.rand(Sc.WALK_MIN_X, Sc.WALK_MAX_X);
+    var dir = t < this.x ? -1 : 1;
+    this.facing = dir;
+    this._pendingWalk = t;
+    if (this.isSide()) { this._sm.set('walk', { x: t }); return; }
+    this._sm.set('turn', { to: 'side', from: 'idle_open', facing: dir, then: 'walk' });
+  };
+
+  /* Arrive at the end of a walk, turning back to face the room first. */
+  Shiro.endWalk = function () {
+    if (this.isSide()) {
+      this._sm.set('turn', {
+        to: 'front', from: 'side_walk_0', facing: this.facing, then: 'idle'
+      });
+    } else {
+      this._sm.set('idle');
+    }
+  };
+
   Shiro.rollNext = function () {
     var B = CFG.BEHAVIOR;
     var Sc = NESCAT.Scene;
@@ -460,7 +489,11 @@
     var r = Math.random();
     if (r < sleepChance) { this._sm.set('sleep'); return; }
     if (r < sleepChance + 0.35) {
-      this._sm.set('walk');
+      /* `this`, not `self`: rollNext is defined at module level, so the
+         `self` captured inside buildStateMachine is not in scope here — in a
+         browser `self` silently resolves to `window`, and this threw
+         "self.startWalk is not a function" every time she decided to walk. */
+      this.startWalk();
       return;
     }
 
@@ -801,6 +834,11 @@
   };
 
   Shiro.frameFor = function () {
+    /* `self` declared up front, not mid-function. In a browser an
+       out-of-scope `self` silently resolves to `window` rather than
+       throwing a ReferenceError, which is exactly how this file managed to
+       ship a call to `self.startWalk()` that only failed at runtime. */
+    var self = this;
     var st = this._sm.state;
     var t = this._sm.time;
     var Bh = CFG.BEHAVIOR;
@@ -823,7 +861,6 @@
       return Math.sin((ct - Bc.lift - Bc.dangle - Bc.kick) * 2.0) > 0
         ? 'side_held_calm_0' : 'side_held_calm_1';
     }
-    var self = this;
 
     /* A short leading frame then a two-frame loop reads as a cycle without
      * needing a separate "loop start" per state. */
