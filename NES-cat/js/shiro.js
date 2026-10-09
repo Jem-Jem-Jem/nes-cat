@@ -173,6 +173,7 @@
           if (self._act.phase === 0) {
             self._act.phase = 1;
             self._sm.time = 0;
+            self.faceFixture();
             NESCAT.Scene.takeFood();
             self.addMeter('eat');
             if (self.onSay) self.onSay('nom');
@@ -190,6 +191,7 @@
           if (self._act.phase === 0) {
             self._act.phase = 1;
             self._sm.time = 0;
+            self.faceFixture();
             NESCAT.Scene.takeWater();
             self.addMeter('drink');
           }
@@ -224,6 +226,7 @@
           if (self._act.phase === 0) {
             self._act.phase = 1;
             self._sm.time = 0;
+            self.faceFixture();
             NESCAT.Scene.pokeToy(7);
           }
           if (s.time > self._act.dur) sm.set('idle');
@@ -240,6 +243,7 @@
             if (!self.arrive(dt, self._act.target, s)) return;
             self._act.phase = 1;
             self._sm.time = 0;
+            self.faceFixture();
           }
           var p = U.clamp(s.time / self._act.dur, 0, 1);
           self._lift = Math.sin(p * Math.PI) * B.pounceHeight;
@@ -276,6 +280,16 @@
     this.x += Math.sign(dx) * CFG.BEHAVIOR.approachSpeed * dt;
     this._bob += dt * 11;
     return false;
+  };
+
+  /* ---------- approach ---------------------------------------------- *
+   * Every fixture is approached from its left (target = fixtureX - gap), so
+   * she must end up facing right. arrive() sets `facing` from the direction
+   * of travel, which is wrong if she happened to walk in from the far side:
+   * the profile sprite would mirror and she would perform with her back to
+   * the bowl. Call this on arrival to pin her the right way round. */
+  Shiro.faceFixture = function () {
+    this.facing = 1;
   };
 
   Shiro.rollNext = function () {
@@ -579,19 +593,29 @@
 
   /* ---------- which view she is drawn in -------------------------------
  *
- * The two sprite views are one system. Front-on while she is stationary,
- * because that is where her face and mood carry the most, and it is
- * symmetric so it needs no mirroring. In profile while she is crossing the
- * room or off the floor, because a front-facing sprite sliding left and
- * right looks like moonwalking — in profile the stride reads, and she can
- * be mirrored to face her direction of travel.
+ * The two sprite views are one system, split by what the pose has to show.
+ *
+ * FRONT — the states that are about her face: idle, sit, sleep, react. She
+ * is facing you, the silhouette is symmetric so it needs no mirroring, and
+ * the expression does the work.
+ *
+ * SIDE — everything whose meaning is in her body. A front-facing sprite
+ * cannot show a neck bending down to a bowl, a paw raised to a muzzle, legs
+ * hanging loose from a hand, or a stride. So travelling states (walk, jump,
+ * pounce) and the states that reach toward something (eat, drink, groom,
+ * wash, tree) plus being carried are all authored in profile.
  *
  * Naming the states here keeps the rule in one place instead of scattering
  * `if (side)` through frameFor(). Side frames are emitted with a `side_`
- * prefix by the build tool. */
-  Shiro.SIDE_STATES = { walk: 1, jump: 1, pounce: 1 };
+ * prefix by the build tool, authored facing right and mirrored at draw time. */
+  Shiro.SIDE_STATES = {
+    walk: 1, jump: 1, pounce: 1,
+    eat: 1, drink: 1, groom: 1, wash: 1, tree: 1
+  };
 
   Shiro.isSide = function () {
+    /* being carried reads best in profile too (loose paws, dragging tail) */
+    if (this.dragging) return true;
     return !!Shiro.SIDE_STATES[this._sm.state];
   };
 
@@ -604,7 +628,7 @@
      * machine is not ticked while the cursor owns her. */
     if (this.dragging) {
       var c = Math.floor(this._carryT * 4) % 3;
-      return c === 0 ? 'held_0' : (c === 1 ? 'held_1' : 'held_2');
+      return c === 0 ? 'side_held_0' : (c === 1 ? 'side_held_1' : 'side_held_2');
     }
     var self = this;
 
@@ -631,11 +655,11 @@
       if (t < Bh.pounceDur * 0.7) return 'side_pounce_1';
       return 'side_pounce_2';
     }
-    if (st === 'eat') return cyc(['eat_0', 'eat_1', 'eat_2', 'eat_1'], 0.25, 3.2);
-    if (st === 'drink') return cyc(['drink_0', 'drink_1'], 0.2, 3.0);
-    if (st === 'groom') return (Math.sin(t * 2.2) > 0) ? 'groom_0' : 'groom_1';
-    if (st === 'wash') return (Math.sin(t * 2.6) > 0) ? 'wash_0' : 'wash_1';
-    if (st === 'tree') return (Math.sin(t * 1.9) > 0) ? 'tree_0' : 'tree_1';
+    if (st === 'eat') return cyc(['side_eat_0', 'side_eat_1', 'side_eat_2', 'side_eat_1'], 0.25, 3.2);
+    if (st === 'drink') return cyc(['side_drink_0', 'side_drink_1'], 0.2, 3.0);
+    if (st === 'groom') return (Math.sin(t * 2.2) > 0) ? 'side_groom_0' : 'side_groom_1';
+    if (st === 'wash') return (Math.sin(t * 2.6) > 0) ? 'side_wash_0' : 'side_wash_1';
+    if (st === 'tree') return (Math.sin(t * 1.9) > 0) ? 'side_tree_0' : 'side_tree_1';
 
     var breathing = Math.sin(this._bob) > 0.55;
     var blink = this.blinkAt();
