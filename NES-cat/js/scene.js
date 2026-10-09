@@ -7,7 +7,7 @@
  *
  *   window  — curtain panels that billow, sun/moon, twinkling stars,
  *             birds drifting past during the day
- *   wall    — a hanging picture that sways, a pendulum clock whose second
+ *   wall    — a framed goldfish picture, a pendulum clock whose second
  *             hand ticks on the real clock, a pendant lamp that swings and
  *             lights up after dark
  *   shelf   — books, a photo frame and a trailing plant that stirs
@@ -416,10 +416,11 @@
 
     /* ---------- wall art -------------------------------------------------- */
 
-    /* A little framed picture of a fish — her favourite. */
+    /* A little framed picture of a fish — her favourite.
+     * Deliberately static: this used to translate +/-1px on a sine, but at
+     * this size that reads as a glitch rather than motion. */
     drawPicture: function (g, L) {
-      var sway = Math.round(Math.sin(this.time * 0.45) * 1);
-      var x = 110 + sway, y = 30, w = 32, h = 30;
+      var x = 110, y = 30, w = 32, h = 30;
 
       /* nail it hangs from */
       fillC(g, U.mixHex(L.wall, '#000000', 0.5));
