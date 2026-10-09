@@ -2,15 +2,73 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>NES-cat</title>
-    <link rel="stylesheet" href="css/style.css">
-    <script src="js/p5.js"></script>
-    <script src="js/addons/p5.sound.min.js"></script>
-    <link href="https://unpkg.com/nes.css@latest/css/nes.min.css" rel="stylesheet" />
+    <link rel="icon" href="data:,">   <!-- stops the browser's favicon 404 -->
+
+    <!-- NES.css framework + its recommended font, Press Start 2P -->
+    <link href="https://unpkg.com/nes.css@2.3.0/css/nes.min.css" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+    <div id="stage"></div>
+
+    <!-- NES.css HUD, floating over the canvas -->
+    <div id="hud">
+        <div class="nes-container is-dark hud-top">
+            <span class="nes-text is-primary" id="cat-name">Shiro</span>
+            <span class="hud-clock" id="clock">--:--</span>
+        </div>
+
+        <div class="nes-container is-dark hud-bars">
+            <div class="bar-row">
+                <span class="bar-label">MOOD</span>
+                <progress id="bar-mood" class="nes-progress is-success" value="74" max="100"></progress>
+                <span class="bar-val" id="val-mood">74%</span>
+            </div>
+            <div class="bar-row">
+                <span class="bar-label">NRGY</span>
+                <progress id="bar-energy" class="nes-progress is-primary" value="66" max="100"></progress>
+                <span class="bar-val" id="val-energy">66%</span>
+            </div>
+            <div class="bar-row">
+                <span class="bar-label">FOOD</span>
+                <progress id="bar-hunger" class="nes-progress is-success" value="22" max="100"></progress>
+                <span class="bar-val" id="val-hunger">22%</span>
+            </div>
+            <button id="mute" class="nes-btn hud-btn">SOUND: ON</button>
+        </div>
+
+        <div id="dialogue" class="nes-container is-dark hud-dialogue">
+            <p id="dialogue-text" class="dialogue-text">&nbsp;</p>
+        </div>
+    </div>
+
+    <!-- PRESS START gate: also the user gesture that unlocks audio -->
+    <div id="gate" class="gate">
+        <div class="nes-container is-dark gate-box">
+            <p class="gate-title">NES-CAT</p>
+            <p class="gate-sub">a small cat in a cozy room</p>
+            <button id="gate-start" class="nes-btn is-primary gate-btn">PRESS START</button>
+            <p class="gate-hint">click Shiro to pet &middot; drag to move &middot; click the room to play</p>
+        </div>
+    </div>
+
+    <!-- p5 first, then the piece: order matters (see README) -->
+    <script src="js/p5.js"></script>
+    <script src="js/addons/p5.sound.min.js"></script>
+
+    <script src="js/config.js"></script>
+    <script src="js/palette.js"></script>
+    <script src="js/frames.js"></script>
+    <script src="js/sprite.js"></script>
+    <script src="js/scene.js"></script>
+    <script src="js/shiro.js"></script>
+    <script src="js/input.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/ui.js"></script>
     <script src="sketch.js"></script>
 </body>
 </html>

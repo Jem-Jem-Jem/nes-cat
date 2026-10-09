@@ -1,20 +1,22 @@
 {
-  "name": "nes-sprites",
+  "name": "nes-cat",
   "version": "1.0.0",
-  "description": "sprites",
+  "description": "Shiro — an animated pixel cat living in a cozy room. p5.js + NES.css.",
   "keywords": [
-    "sprites"
+    "p5.js",
+    "nes.css",
+    "pixel-art",
+    "creative-coding",
+    "chiptune"
   ],
-  "repository": {
-    "type": "git",
-    "url": "nes-sprites"
-  },
   "license": "ISC",
   "author": "jem-jem-jem",
   "type": "commonjs",
-  "main": "index.js",
   "scripts": {
-    "test": "run"
+    "start": "npx --yes http-server . -p 8080 -c-1",
+    "sprites:check": "node tools/build-sprites.js --check",
+    "sprites:preview": "node tools/build-sprites.js --preview",
+    "sprites:build": "node tools/build-sprites.js --build"
   },
   "dependencies": {
     "nes.css": "^2.2.1",
