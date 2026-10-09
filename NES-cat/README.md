@@ -92,19 +92,36 @@ npm run sprites:check     # verify every frame is 32x32 and flip-safe
 npm run sprites:build     # regenerate js/frames.js
 ```
 
-Shiro is drawn **front-on**. That keeps her silhouette mirror-symmetric, which
-is what lets one sprite read as "walking left" or "walking right" without a
-second set of art and without a horizontal flip — so `--check` enforces the
-mirror everywhere, exempting only what is deliberate: the tail (read from the
-exact mask the builder stamped, since a raised tail sits far higher than a
-hanging one), the alternating walk paw, the eye glance, and the one-paw-up
-grooming poses. It also asserts nothing lands on the last row, which would
-read as clipped.
+Shiro is drawn in **two views, and the split is deliberate** — it is one
+system, not two versions of the cat:
 
-To add a pose, add a `pose(name, {...})` line in `frames()`. The rig
-parameters are `bodyDY/headDY`, `squash`, `pawLift` (raises or lowers both
-front paws), `legPhase`, `tailSway`, `tailUp`, `earPerk`,
-`eyes: open|closed|happy|wide`, `mouth: smile|open|pant` and `look`.
+| View | Used for | Why |
+| --- | --- | --- |
+| **front** | every stationary state: idle, sit, sleep, eat, drink, groom, wash, held | She is facing you. Symmetric, so one frame reads as facing left *or* right with no second art and no flip — and it is where her face and mood do the most work. |
+| **side** | the states that cross the room or leave the floor: walk, jump, pounce | A front-facing sprite sliding left and right looks like moonwalking. In profile the stride reads, and she can be mirrored to face her direction of travel. |
+
+The rule lives in one place — `Shiro.SIDE_STATES` in `shiro.js` names the
+travelling states, and `frameFor()` maps them onto the `side_` frames. Both
+rigs are built by the same tool and land in the same frame table; side
+frames carry a `side_` prefix and are authored facing right, mirrored at draw
+time.
+
+Because the front view is symmetric, `--check` enforces the mirror there,
+exempting only what is deliberate: the tail (read from the exact mask the
+builder stamped, since a raised tail sits far higher than a hanging one), the
+alternating walk paw, the eye glance, and the one-paw-up grooming poses.
+Side frames are asymmetric by nature, so they are only checked for shape —
+right size, and nothing on the last row or last column, since the flip pass
+would clip the latter. Both views are checked that way.
+
+To add a pose, add a `pose(name, {...})` or `side(name, {...})` line in
+`frames()`. The front rig takes `bodyDY/headDY`, `squash`, `pawLift` (raises or
+lowers both front paws), `legPhase`, `tailSway`, `tailUp`, `earPerk`,
+`eyes: open|closed|happy|wide`, `mouth: smile|open|pant` and `look`. The side
+rig takes `bodyX/bodyY`, `bodyRX/bodyRY`, `headDX/headDY`, a `legs` map of
+`{ x, lift, hide }` per leg, and a `tail` of `{ sway, lift, curl }` — in
+profile the legs move fore/aft as well as up, which is what makes a stride
+read.
 
 Flourish frames are composed as `base + suffix` (e.g. `sit_closed_tailUp1`),
 so any pose that can host a flourish needs a variant per eye state — a blink
