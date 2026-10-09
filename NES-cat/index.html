@@ -56,9 +56,12 @@
         </div>
     </div>
 
-    <!-- p5 first, then the piece: order matters (see README) -->
-    <script src="js/p5.js"></script>
-    <script src="js/addons/p5.sound.min.js"></script>
+    <!-- p5 first, then the piece: order matters (see README).
+         Both libraries load from a CDN at the exact versions this was built
+         against, so they match the CDN-sourced NES.css above and no vendor
+         copies need to live in the repo. -->
+    <script src="https://cdn.jsdelivr.net/npm/p5@2.3.4/lib/p5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/p5.sound@0.4.1/dist/p5.sound.min.js"></script>
 
     <script src="js/config.js"></script>
     <script src="js/palette.js"></script>
