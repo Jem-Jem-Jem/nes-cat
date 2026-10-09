@@ -125,6 +125,14 @@
       cutoff: 1500,
       delayTime: 0.34,
       delayFeedback: 0.3,
+
+      /* Shiro's voice: one blip per typed character. `blipPitch` is a motif
+       * of semitone offsets walked in order and reset each line, so a
+       * sentence gets its own little melody instead of a flat buzz. */
+      blipOctave: 4,                      /* above the music root -> small voice */
+      blipDur: 0.045,
+      blipVol: 0.045,
+      blipPitch: [0, 3, 5, 3, 7, 5, 3, 0],
       muteKey: 'nescat.muted'
     },
 

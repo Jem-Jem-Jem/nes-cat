@@ -111,19 +111,27 @@ body {
     opacity: 0.6;
 }
 
-/* dialogue box, bottom-right */
+/* dialogue box — centred along the bottom, under the stage.
+   Width and text size are kept in step: the box has to grow with the type
+   or the line wraps into a wall of tiny words. Both scale down together in
+   the narrow-viewport block at the bottom of this file. */
 #hud .hud-dialogue {
     position: absolute;
-    right: 10px;
-    bottom: 10px;
-    width: 300px;
-    min-height: 54px;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 12px;
+    width: min(560px, calc(100% - 300px));
+    min-height: 92px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .dialogue-text {
-    font-size: 9px;
-    line-height: 1.7;
+    font-size: 14px;
+    line-height: 1.75;
     color: #fff;
+    text-align: center;
     word-break: break-word;
 }
 
@@ -192,12 +200,15 @@ body {
         font-size: 8px;
         padding: 6px 8px;
     }
+    /* Dialogue scales with the viewport: both the box and its type step
+       down together so the line never overflows the frame it sits in. */
     #hud .hud-dialogue {
-        width: 168px;
-        min-height: 42px;
+        width: min(420px, calc(100% - 40px));
+        min-height: 66px;
     }
     .dialogue-text {
-        font-size: 8px;
+        font-size: 10px;
+        line-height: 1.7;
     }
     .gate-title {
         font-size: 13px;

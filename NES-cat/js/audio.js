@@ -37,6 +37,7 @@
     _filter: null,
     _timer: null,
     _step: 0,
+    _voiceIdx: 0,       /* position in the blip motif, reset per line */
 
     /* ---------- setup ---------------------------------------------------- */
 
@@ -168,6 +169,31 @@
       osc.onended = function () {
         try { osc.disconnect(); gain.disconnect(); } catch (e) { /* already gone */ }
       };
+    },
+
+    /* ---------- Shiro's voice --------------------------------------------
+     *
+     * One short blip per typed character, so a line of dialogue is audible
+     * as well as visible. The pitch walks a small motif and resets at the
+     * start of each line, which is what makes it read as a voice rather
+     * than a metronome. Kept deliberately quiet and short so it sits
+     * under the music instead of fighting it. */
+
+    /* Call when a new line starts, so each sentence gets its own melody. */
+    resetVoice: function () {
+      this._voiceIdx = 0;
+    },
+
+    blip: function () {
+      if (this.muted || !this._ctx) return;
+      var ctx = this._ctx;
+      var t = ctx.currentTime + 0.001;
+      var motif = A.blipPitch;
+      /* step through the motif, then drop back to its start */
+      var i = this._voiceIdx % motif.length;
+      this._voiceIdx++;
+      var freq = A.root * A.blipOctave * Math.pow(2, motif[i] / 12);
+      this._voice(freq, t, A.blipDur, 'square', A.blipVol);
     },
 
     /* ---------- control ---------------------------------------------------- */

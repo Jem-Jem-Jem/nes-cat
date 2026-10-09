@@ -105,8 +105,11 @@
 
       this._full = line;
       this._shown = 0;
+      this._lastN = 0;                    /* characters already voiced */
       this._typing = true;
       this._gap = 2.2;
+      /* each line starts its own little melody */
+      if (NESCAT.Audio && NESCAT.Audio.resetVoice) NESCAT.Audio.resetVoice();
       if (this.els.dialogueText) this.els.dialogueText.textContent = '';
     },
 
@@ -118,6 +121,19 @@
       if (this._typing) {
         this._shown += TYPE_CPS * dt;
         var n = Math.floor(this._shown);
+        /* one voice blip per character that just appeared, so she is
+         * audibly speaking the line as it is written */
+        if (n > this._lastN) {
+          var fresh = this._full.slice(this._lastN, n);
+          if (NESCAT.Audio && NESCAT.Audio.blip) {
+            for (var c = 0; c < fresh.length; c++) {
+              /* punctuation gets a beat of silence, like punctuation */
+              if ('.,!?~'.indexOf(fresh.charAt(c)) >= 0) continue;
+              NESCAT.Audio.blip();
+            }
+          }
+        }
+        this._lastN = n;
         if (n >= this._full.length) {
           this._typing = false;
           this.setDialogue(this._full, false);
