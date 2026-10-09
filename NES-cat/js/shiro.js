@@ -42,6 +42,7 @@
     _blinkNext: 3,
     _flourish: null,      /* a short idle flourish: glance / tail flick / yawn */
     _flourishGap: 5,      /* seconds until the next one is rolled */
+    _wakeT: 0,            /* s of enforced wakefulness left after rousing */
     _lift: 0,             /* px she is airborne (jump / pounce / carried) */
     facing: 1,            /* profile only: 1 = right, -1 = mirrored */
     facing: 1,            /* 1 = right, -1 = mirrored */
@@ -483,8 +484,14 @@
     var B = CFG.BEHAVIOR;
     var Sc = NESCAT.Scene;
     var night = Sc.isNight;
-    var sleepChance = night ? B.sleepChanceNight : B.sleepChanceDay;
-    if (this.meters.energy < 0.18) sleepChance = Math.max(sleepChance, 0.7);
+
+    /* How tired she is: 0 at sleepEnergyMax, 1 at flat. Sleeping is scaled
+     * by this rather than rolled flat, so a rested cat never drops off
+     * regardless of the hour — which is what stopped the sleep/wake loop. */
+    var tired = 1 - U.clamp(this.meters.energy / B.sleepEnergyMax, 0, 1);
+    var sleepChance = (night ? B.sleepChanceNight : B.sleepChanceDay) * tired;
+    /* and she has been up long enough to want to lie down again */
+    if (this._wakeT > 0) sleepChance = 0;
 
     var r = Math.random();
     if (r < sleepChance) { this._sm.set('sleep'); return; }
@@ -615,6 +622,9 @@
    asleep to awake — actually looks like a cat getting up. */
   Shiro.wake = function () {
     this._squash = 0.4;
+    /* she stays up for a while whatever her energy says, so a long night
+       cannot bounce her straight back into bed */
+    this._wakeT = CFG.BEHAVIOR.wakeCooldown;
     this._sm.set('stretch', { fromSleep: true });
   };
 
@@ -709,6 +719,8 @@
       this._blinkShow = CFG.BEHAVIOR.blinkDur;
     }
     if (this._blinkShow > 0) this._blinkShow -= dt;
+
+    if (this._wakeT > 0) this._wakeT -= dt;
 
     this.updateFlourish(dt);
 

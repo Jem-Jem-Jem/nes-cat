@@ -33,8 +33,15 @@
       sitMax: 11.0,
       reactMin: 1.5,
       reactMax: 2.4,
-      sleepChanceNight: 0.9, /* chance a wander roll becomes "go to sleep" at night */
-      sleepChanceDay: 0.08,
+      /* Sleeping is a response to tiredness, scaled by whether it is dark. These
+       * are ceilings: the actual chance is `ceiling * tiredness`, where
+       * tiredness is 0 at sleepEnergyMax and 1 at empty. A flat chance here
+       * meant a fully-rested cat rolled "sleep" and slept anyway, so at night
+       * she slept, woke stretched, and immediately went back to bed. */
+      sleepChanceNight: 0.92,  /* ceiling when dark */
+      sleepChanceDay: 0.30,    /* ceiling in daylight — a nap, not a night */
+      sleepEnergyMax: 0.70,    /* above this she is too rested to consider it */
+      wakeCooldown: 34,        /* s she stays awake after rousing, whatever her mood */
       blinkMin: 2.2,
       blinkMax: 6.5,
       blinkDur: 0.16,        /* one blink: half-closed -> shut -> half-open */
