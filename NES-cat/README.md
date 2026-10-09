@@ -107,11 +107,53 @@ The rule lives in one place — `Shiro.SIDE_STATES` in `shiro.js` names the
 profile states, and `frameFor()` maps them onto the `side_` frames. Both
 rigs are built by the same tool and land in the same frame table; side
 frames carry a `side_` prefix, are authored facing right, and are mirrored
-at draw time.
+at draw time. The mirror is decided *per frame* rather than per state —
+anything drawn from the profile carries the `side_` prefix — because a turn
+is profile art at both ends with a front pose in the middle.
 
 Because fixtures are always approached from their left, `faceFixture()` pins
 her to facing right on arrival — otherwise arriving from the far side would
 mirror the profile sprite and she would perform with her back to the bowl.
+
+## Animation states
+
+Choreography lives in `shiro.js`; `config.js` BEHAVIOR holds every duration
+and weight, so nothing about the feel needs touching code.
+
+**Turning.** `turn` plays the bridge between the two views: the pose she is
+leaving, two three-quarter frames, then the destination view. `startWalk()`
+pivots before setting off and `endWalk()` turns her back on arrival, so the
+most common transition in the piece never hard-cuts between views.
+
+**Stationary.** `idle` (breathing, blinking, cursor gaze, plus the
+flourishes), `sit`, `sleep`, `react`, and two whole postures that are not
+flourish overlays: `stretch` (spine uncoiling, hold, release) and `loaf`
+(tucked into a compact oval). `knead` and `alert` are in the same family.
+
+**Travelling.** `walk` is a six-frame cycle driven by *distance travelled*
+rather than a clock, so the paws never skate. `jump` and `pounce` carry a
+vertical arc while the shadow stays on the floor and shrinks.
+
+**Reaching.** `eat`, `drink`, `groom`, `wash`, `tree` and `watch` — the
+states where what matters is her body bending or reaching toward something.
+`watch` is the turn as an activity in its own right: she turns to profile,
+stands there breathing, and turns back.
+
+**Being carried.** Not a loop — a sequence: `held_lift` (the "!"), then the
+hang, a couple of startled kicks, then settling.
+
+Two transitions are worth knowing about because they were missing and are
+easy to break: `wake()` routes through `stretch`, because a cat gets up by
+stretching and asleep-to-awake is the most common transition in the piece;
+and `dragEnd()` lands her into `shake`, without which being put down just
+stopped hanging and read as a sprite swap.
+
+> **Two traps in this file.** States are invoked as
+> `enter(sm, previous, payload)` — a state that wants the payload must
+> declare all three parameters, or it silently receives the state machine
+> and every payload field reads back `undefined`. And `self` only means
+> Shiro inside `buildStateMachine`; at module level, `self` resolves to
+> `window` in a browser. Neither shows up in `node --check`.
 
 Because the front view is symmetric, `--check` enforces the mirror there,
 exempting only what is deliberate: the tail (read from the exact mask the
