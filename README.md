@@ -11,8 +11,9 @@ data, and a small reusable API draws them.
 
 ## Running locally
 
-The page loads external stylesheets/fonts, so serve the folder over HTTP rather
-than opening the file directly:
+The page loads its libraries and fonts from a CDN, so serve the folder over
+HTTP rather than opening the file directly (and it needs a network connection
+the first time it loads):
 
 ```bash
 # npm script (uses npx http-server)
@@ -27,6 +28,19 @@ python -m http.server 8080
 Then open <http://localhost:8080/NES-cat/>.
 
 Press **PRESS START** to begin — that click is also what unlocks audio.
+
+Everything the page needs is pinned to an exact version, so a given commit
+always runs against the same libraries:
+
+| Loaded from | Version |
+|---|---|
+| NES.css (unpkg) | `2.3.0` |
+| p5.js (jsDelivr) | `2.3.4` |
+| p5.sound (jsDelivr) | `0.4.1` |
+| Press Start 2P (Google Fonts) | — |
+
+There are no runtime npm dependencies: `npm install` is not required, and
+`package.json` declares none.
 
 ## Controls
 

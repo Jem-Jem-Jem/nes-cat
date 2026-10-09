@@ -17,9 +17,5 @@
     "sprites:check": "node tools/build-sprites.js --check",
     "sprites:preview": "node tools/build-sprites.js --preview",
     "sprites:build": "node tools/build-sprites.js --build"
-  },
-  "dependencies": {
-    "nes.css": "^2.2.1",
-    "p5": "^2.3.4"
   }
 }
