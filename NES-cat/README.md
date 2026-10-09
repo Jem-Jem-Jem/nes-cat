@@ -62,7 +62,8 @@ NES-cat/
   js/
     config.js         THE tuning surface (sizes, timings, meters, day/night keys)
     palette.js        NES.css-derived palette + day/night interpolation
-    frames.js         GENERATED literal 32x32 pixel frames for Shiro
+    frames.js         literal 32x32 pixel frames for Shiro (GENERATED)
+    frames-extra.js   GENERATED derived frames (tail swish, yawn)
     sprite.js         reusable sprite API: makeSprite/draw/state machine
     scene.js          the room, lighting and ambient animation
     shiro.js          Shiro: state machine, meters, particles
@@ -71,7 +72,9 @@ NES-cat/
     ui.js             NES.css HUD: gate, dialogue, bars, sound
   css/style.css       theme bridge + HUD layout
 tools/
-  build-sprites.js    authoring tool for the pixel frames
+  build-sprites.js    generates js/frames.js (the base poses)
+NES-cat/tools/
+  derive-frames.js    derives js/frames-extra.js from js/frames.js
 ```
 
 ## Rendering
@@ -82,7 +85,10 @@ stage is painted the NES.css theme black rather than letterboxed.
 
 ## Editing the cat art
 
-Shiro's frames are generated so they stay consistent and symmetric:
+Shiro's art is generated in two stages, so the shapes stay parametric and
+symmetric while the shipped frames remain plain, diffable data:
+
+**1. Base poses → `js/frames.js`**
 
 ```bash
 npm run sprites:preview   # print every frame as ASCII
@@ -90,8 +96,28 @@ npm run sprites:check     # verify 32x32 sizes + left/right symmetry
 npm run sprites:build     # regenerate js/frames.js
 ```
 
-Edit `tools/build-sprites.js` (the shapes are parametric), then rebuild. This is
-also how new animation frames should be added.
+Edit the shapes in `tools/build-sprites.js`, then rebuild. Run
+`sprites:check` before committing — it fails if any frame breaks symmetry.
+
+**2. Derived frames → `js/frames-extra.js`**
+
+The tail swish and the yawn are *derived* from the base poses rather than
+hand-duplicated, so they can never drift out of sync with the art they came
+from:
+
+```bash
+node tools/derive-frames.js                    # regenerate js/frames-extra.js
+node tools/derive-frames.js --preview          # print every derived frame as ASCII
+node tools/derive-frames.js --preview idle_open_tailUp0   # ...just one
+```
+
+The tool validates every output is exactly 32x32 and records which base pose
+each frame came from in the generated header. To add a new derived frame, edit
+the derivation table near the bottom of `tools/derive-frames.js`.
+
+> **Note:** both files are generated. Re-run `sprites:build` *then*
+> `node tools/derive-frames.js` in that order — the derivation reads
+> `js/frames.js` as its input.
 
 ## Resources
 
