@@ -65,11 +65,6 @@
     var B = CFG.BEHAVIOR;
     var sm;
 
-    function toIdle() {
-      self._wander = U.rand(B.wanderMin, B.wanderMax);
-      sm.set('idle');
-    }
-
     function say(key) {
       if (self.onSay) self.onSay(key);
     }
@@ -135,8 +130,11 @@
       }
     };
 
-    /* rollNext() (defined below) picks the next state; it needs the machine. */
-    this._sm = NESCAT.Sprite.makeStateMachine(states, 'idle');
+    /* rollNext() (defined below) picks the next state; it needs the machine.
+     * `sm` MUST be bound before any state's update() runs — walk/sit/react all
+     * call sm.set(). makeStateMachine only invokes the initial state's enter(),
+     * which does not touch sm, so binding after construction is safe. */
+    sm = this._sm = NESCAT.Sprite.makeStateMachine(states, 'idle');
   };
 
   Shiro.rollNext = function () {
