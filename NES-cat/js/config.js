@@ -52,7 +52,37 @@
         tailFlick: 0.6,
         tailUp: 3.4,
         yawn: 1.6
-      }
+      },
+
+      /* --- activities ---------------------------------------------------- *
+       * Each is a state that walks her to a fixture, performs, and returns
+       * to idle. `approachSpeed` is logical px/s while closing the gap. */
+      jumpDur: 0.62,
+      jumpHeight: 13,        /* logical px her paws clear the floor */
+      eatDur: 2.6,
+      drinkDur: 2.1,
+      groomDur: 3.4,
+      washDur: 2.8,
+      pounceDur: 0.75,
+      pounceHeight: 10,
+      treeDur: 2.2,
+      approachSpeed: 46,
+      /* how close counts as "arrived" at a fixture */
+      arriveEps: 3,
+
+      /* Odds that a wander roll becomes each activity. An activity gated on
+       * a meter or on the room (eating needs food in the bowl) is skipped
+       * when unavailable rather than re-rolled. */
+      wSit: 26,
+      wGroom: 16,
+      wWash: 12,
+      wTree: 18,
+      wYarn: 20,
+      wJump: 10,
+      /* hunger climbs as she gets hungry; past this she heads for the bowl */
+      hungryBelow: 0.45,
+      /* the cat tree is only worth jumping at when she is already near it */
+      treeNearX: 26
     },
 
     /* --- meters (all 0..1) -------------------------------------------- */
@@ -68,6 +98,8 @@
       pet: { mood: 0.05, energy: -0.001, hunger: 0 },
       play: { mood: 0.07, energy: -0.055, hunger: 0.012 },
       sleep: { mood: 0.004, energy: 0.022, hunger: 0.001 },
+      eat: { mood: 0.02, energy: 0.012, hunger: -0.30 },
+      drink: { mood: 0.012, energy: 0.010, hunger: -0.02 },
       petHoldPerSecond: 0.055,   /* while a pet press is held */
       clamp: [0, 1]
     },

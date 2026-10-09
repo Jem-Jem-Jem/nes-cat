@@ -42,6 +42,8 @@
     _blinkNext: 3,
     _flourish: null,      /* a short idle flourish: glance / tail flick / yawn */
     _flourishGap: 5,      /* seconds until the next one is rolled */
+    _lift: 0,             /* px she is airborne (jump / pounce) */
+    facing: 1,            /* 1 = right, -1 = mirrored */
     _squash: 0,         /* transient squash/stretch amount */
     _squashV: 0,
     _wander: 0,
@@ -90,6 +92,7 @@
           var dx = self._targetX - self.x;
           var speed = 26;                     /* logical px/s */
           if (Math.abs(dx) < 1.5) { sm.set('idle'); return; }
+          self.facing = dx < 0 ? -1 : 1;
           self.x += Math.sign(dx) * speed * dt;
           self._bob += dt * 11;
           if (s.time > self._walkDur + 1.5) sm.set('idle');
@@ -124,11 +127,128 @@
         enter: function (payload) {
           self._reactDur = U.rand(B.reactMin, B.reactMax);
           self._squashV = -14;
+          /* a pet/drag/play cancels whatever she was doing — including
+           * dropping her back to the floor if she was mid-jump */
+          self._lift = 0;
           if (payload && payload.say) say(payload.say);
         },
         update: function (dt, s) {
           self._bob += dt * 14;
           if (s.time > self._reactDur) sm.set('idle');
+        }
+      },
+
+      /* ---------- activities --------------------------------------------
+       * Each activity has two phases: she walks to a fixture, then performs
+       * in place. `self._act` carries { target, dur } between them, so the
+       * approach and the performance share one state. */
+
+      jump: {
+        enter: function () {
+          self._act = { target: null, dur: B.jumpDur, done: false };
+          self._lift = 0;
+        },
+        update: function (dt, s) {
+          var p = U.clamp(s.time / self._act.dur, 0, 1);
+          /* a sine arc: up fast, hang, come down */
+          self._lift = Math.sin(p * Math.PI) * B.jumpHeight;
+          if (p > 0.15 && p < 0.55 && !self._act.booted) {
+            self._act.booted = true;
+            /* batting the hanging toy only if she jumped beside it */
+            if (Math.abs(self.x - NESCAT.Scene.CAT_TREE_X) < B.treeNearX) {
+              NESCAT.Scene.pokeToy(11);
+            }
+          }
+          if (p >= 1) { self._lift = 0; sm.set('idle'); }
+        }
+      },
+
+      eat: {
+        enter: function () {
+          self._act = { target: NESCAT.Scene.BOWL_FOOD_X - 18, dur: B.eatDur, phase: 0 };
+        },
+        update: function (dt, s) {
+          if (!self.arrive(dt, self._act.target, s)) return;
+          if (self._act.phase === 0) {
+            self._act.phase = 1;
+            self._sm.time = 0;
+            NESCAT.Scene.takeFood();
+            self.addMeter('eat');
+            if (self.onSay) self.onSay('nom');
+          }
+          if (s.time > self._act.dur) sm.set('idle');
+        }
+      },
+
+      drink: {
+        enter: function () {
+          self._act = { target: NESCAT.Scene.BOWL_WATER_X - 18, dur: B.drinkDur, phase: 0 };
+        },
+        update: function (dt, s) {
+          if (!self.arrive(dt, self._act.target, s)) return;
+          if (self._act.phase === 0) {
+            self._act.phase = 1;
+            self._sm.time = 0;
+            NESCAT.Scene.takeWater();
+            self.addMeter('drink');
+          }
+          if (s.time > self._act.dur) sm.set('idle');
+        }
+      },
+
+      groom: {
+        enter: function () {
+          self._act = { target: null, dur: B.groomDur, phase: 0 };
+        },
+        update: function (dt, s) {
+          if (s.time > self._act.dur) sm.set('idle');
+        }
+      },
+
+      wash: {
+        enter: function () {
+          self._act = { target: null, dur: B.washDur, phase: 0 };
+        },
+        update: function (dt, s) {
+          if (s.time > self._act.dur) sm.set('idle');
+        }
+      },
+
+      tree: {
+        enter: function () {
+          self._act = { target: NESCAT.Scene.CAT_TREE_X - 22, dur: B.treeDur, phase: 0 };
+        },
+        update: function (dt, s) {
+          if (!self.arrive(dt, self._act.target, s)) return;
+          if (self._act.phase === 0) {
+            self._act.phase = 1;
+            self._sm.time = 0;
+            NESCAT.Scene.pokeToy(7);
+          }
+          if (s.time > self._act.dur) sm.set('idle');
+        }
+      },
+
+      pounce: {
+        enter: function () {
+          self._act = { target: NESCAT.Scene._yarnX - 26, dur: B.pounceDur, phase: 0, hit: false };
+          self._lift = 0;
+        },
+        update: function (dt, s) {
+          if (self._act.phase === 0) {
+            if (!self.arrive(dt, self._act.target, s)) return;
+            self._act.phase = 1;
+            self._sm.time = 0;
+          }
+          var p = U.clamp(s.time / self._act.dur, 0, 1);
+          self._lift = Math.sin(p * Math.PI) * B.pounceHeight;
+          /* the swat lands a bit before she touches down */
+          if (p > 0.45 && !self._act.hit) {
+            self._act.hit = true;
+            NESCAT.Scene.nudgeYarn(self.x + 16, 24);
+            self.addMeter('play');
+          }
+          if (p >= 1) { self._lift = 0; sm.set('idle'); }
         }
       }
     };
@@ -140,9 +260,27 @@
     sm = this._sm = NESCAT.Sprite.makeStateMachine(states, 'idle');
   };
 
+  /* Walk toward a fixture until she is close enough to act on it.
+   Returns true once arrived (and latches, so the caller can then run its
+   performance phase without re-walking every frame). */
+  Shiro.arrive = function (dt, targetX, s) {
+    if (this._act.arrived) return true;
+    var dx = targetX - this.x;
+    if (Math.abs(dx) <= CFG.BEHAVIOR.arriveEps) {
+      this._act.arrived = true;
+      return true;
+    }
+    /* face the way she is travelling so the walk cycle reads correctly */
+    this.facing = dx < 0 ? -1 : 1;
+    this.x += Math.sign(dx) * CFG.BEHAVIOR.approachSpeed * dt;
+    this._bob += dt * 11;
+    return false;
+  };
+
   Shiro.rollNext = function () {
     var B = CFG.BEHAVIOR;
-    var night = NESCAT.Scene.isNight;
+    var Sc = NESCAT.Scene;
+    var night = Sc.isNight;
     var sleepChance = night ? B.sleepChanceNight : B.sleepChanceDay;
     if (this.meters.energy < 0.18) sleepChance = Math.max(sleepChance, 0.7);
 
@@ -152,12 +290,40 @@
       this._sm.set('walk');
       return;
     }
-    if (U.chance(0.5)) {
-      this._sm.set('sit');
-    } else {
-      /* stay in idle, but reset the dwell timer (set() would no-op on itself) */
-      this._wander = U.rand(B.wanderMin, B.wanderMax);
+
+    /* Build a pool of what she could plausibly do right now, then pick.
+     * Unavailable activities are left out rather than re-rolled, so a roll
+     * never turns into "walk to the bowl, find it empty". */
+    var pool = [['sit', B.wSit]];
+    /* `hunger` rises as she gets hungry, so she looks for food once it
+     * climbs past the threshold (and only if the bowl is not empty). */
+    if (this.meters.hunger > B.hungryBelow && Sc.food > 0.05) pool.push(['eat', 30]);
+    else pool.push(['groom', B.wGroom]);
+    if (this.meters.energy > 0.3) pool.push(['wash', B.wWash]);
+    if (Sc.water > 0.05) pool.push(['drink', 18]);
+    if (Math.abs(this.x - Sc.CAT_TREE_X) < B.treeNearX) pool.push(['tree', B.wTree]);
+    else pool.push(['jump', B.wJump]);
+    pool.push(['pounce', B.wYarn]);
+
+    var total = 0, i;
+    for (i = 0; i < pool.length; i++) total += pool[i][1];
+    var pick = Math.random() * total;
+    var kind = 'sit';
+    for (i = 0; i < pool.length; i++) {
+      pick -= pool[i][1];
+      if (pick <= 0) { kind = pool[i][0]; break; }
     }
+
+    if (kind === 'sit') { this._sm.set('sit'); return; }
+    if (kind === 'pounce') { this._sm.set('pounce'); return; }
+
+    /* stays put: point her at the fixture and let the state walk her over */
+    if (kind === 'eat') this._sm.set('eat', { from: null });
+    else if (kind === 'drink') this._sm.set('drink', { from: null });
+    else if (kind === 'groom') this._sm.set('groom', { from: null });
+    else if (kind === 'wash') this._sm.set('wash', { from: null });
+    else if (kind === 'tree') this._sm.set('tree', { from: null });
+    else if (kind === 'jump') this._sm.set('jump', { from: null });
   };
 
   /* ---------- interactions --------------------------------------------- */
@@ -191,6 +357,8 @@
   };
 
   Shiro.dragTo = function (x) {
+    /* face the way she is being dragged (test before moving) */
+    this.facing = x >= this.x ? 1 : -1;
     this.x = U.clamp(x, NESCAT.Scene.WALK_MIN_X - 12, NESCAT.Scene.WALK_MAX_X + 12);
   };
 
@@ -370,10 +538,36 @@
 
   Shiro.frameFor = function () {
     var st = this._sm.state;
+    var t = this._sm.time;
+    var Bh = CFG.BEHAVIOR;
+
+    /* A short leading frame then a two-frame loop reads as a cycle without
+     * needing a separate "loop start" per state. */
+    function cyc(frames, lead, rate) {
+      if (t < lead) return frames[0];
+      return frames[1 + (Math.floor((t - lead) * rate) % (frames.length - 1))];
+    }
 
     if (st === 'sleep') return (Math.sin(this._bob) > 0) ? 'sleep_0' : 'sleep_1';
-    if (st === 'react') return (this._sm.time < 0.16) ? 'react_0' : 'react_1';
-    if (st === 'walk') return 'walk_' + (Math.floor(this._sm.time * 7) % 4);
+    if (st === 'react') return (t < 0.16) ? 'react_0' : 'react_1';
+    if (st === 'walk') return 'walk_' + (Math.floor(t * 7) % 4);
+
+    if (st === 'jump') {
+      if (t < Bh.jumpDur * 0.22) return 'jump_0';
+      if (t < Bh.jumpDur * 0.5) return 'jump_1';
+      if (t < Bh.jumpDur * 0.78) return 'jump_2';
+      return 'jump_3';
+    }
+    if (st === 'pounce') {
+      if (t < Bh.pounceDur * 0.3) return 'pounce_0';
+      if (t < Bh.pounceDur * 0.7) return 'pounce_1';
+      return 'pounce_2';
+    }
+    if (st === 'eat') return cyc(['eat_0', 'eat_1', 'eat_2', 'eat_1'], 0.25, 3.2);
+    if (st === 'drink') return cyc(['drink_0', 'drink_1'], 0.2, 3.0);
+    if (st === 'groom') return (Math.sin(t * 2.2) > 0) ? 'groom_0' : 'groom_1';
+    if (st === 'wash') return (Math.sin(t * 2.6) > 0) ? 'wash_0' : 'wash_1';
+    if (st === 'tree') return (Math.sin(t * 1.9) > 0) ? 'tree_0' : 'tree_1';
 
     var breathing = Math.sin(this._bob) > 0.55;
     var base = breathing ? 'idle_breathe' : 'idle_open';
@@ -422,17 +616,23 @@
     var ambient = light ? light.ambient : null;
     var amt = light ? light.ambientAmt : 0;
 
-    /* soft shadow on the floor */
+    /* She is authored facing right and mirrored to face left. Mid-air the
+     * shadow stays on the floor and shrinks, which is what sells the height. */
+    var lift = this._lift || 0;
+    var air = lift / 14;
+
     g.noStroke();
-    g.fill(0, 0, 0, 60);
-    g.ellipse(this.x + 16, NESCAT.Scene.FEET_Y + 2, 30, 7);
+    g.fill(0, 0, 0, Math.round(60 * (1 - air * 0.55)));
+    g.ellipse(this.x + 16, NESCAT.Scene.FEET_Y + 2,
+              30 - air * 14, 7 - air * 3);
 
     /* particles behind the cat if they are "above" her */
     this.drawParticles(g, false);
 
-    NESCAT.Sprite.draw(g, this.sprite, this.frameFor(), this.x, this.y, {
+    NESCAT.Sprite.draw(g, this.sprite, this.frameFor(), this.x, this.y - lift, {
       ambient: ambient,
-      ambientAmt: amt
+      ambientAmt: amt,
+      flip: this.facing < 0
     });
 
     this.drawParticles(g, true);
