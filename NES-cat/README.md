@@ -92,17 +92,30 @@ npm run sprites:check     # verify every frame is 32x32 and flip-safe
 npm run sprites:build     # regenerate js/frames.js
 ```
 
-Shiro is drawn in **side view, facing right**; `Sprite.draw()` mirrors her to
-face left. Because a side view has no mirror symmetry to preserve, `--check`
-asserts the things that would actually break instead: every frame is 32x32,
-nothing sits on the last row (she would read as cropped) and nothing touches
-the last column (which the left-facing mirror pass would clip).
+Shiro is drawn **front-on**. That keeps her silhouette mirror-symmetric, which
+is what lets one sprite read as "walking left" or "walking right" without a
+second set of art and without a horizontal flip — so `--check` enforces the
+mirror everywhere, exempting only what is deliberate: the tail (read from the
+exact mask the builder stamped, since a raised tail sits far higher than a
+hanging one), the alternating walk paw, the eye glance, and the one-paw-up
+grooming poses. It also asserts nothing lands on the last row, which would
+read as clipped.
 
-To add a pose, edit `RIG` (the canonical skeleton — body, head, four legs,
-tail) and then add a `buildCat({...})` entry in `frames()`. `buildCat` takes
-`legs: { nearFront: { lift, hide } }`, `tail: { sway, lift, curl }`,
-`bodyRX/bodyRY/headDX/headDY` and `eyes: open|closed|squint|happy|wide` — a new
-animation is normally just a few lines of that.
+To add a pose, add a `pose(name, {...})` line in `frames()`. The rig
+parameters are `bodyDY/headDY`, `squash`, `pawLift` (raises or lowers both
+front paws), `legPhase`, `tailSway`, `tailUp`, `earPerk`,
+`eyes: open|closed|happy|wide`, `mouth: smile|open|pant` and `look`.
+
+Flourish frames are composed as `base + suffix` (e.g. `sit_closed_tailUp1`),
+so any pose that can host a flourish needs a variant per eye state — a blink
+landing mid-flourish asks for the closed-eyes one. `Shiro.pickFrame()`
+resolves composed names against the real frame table and falls back to the
+base pose, so a missing variant costs a flourish rather than a frame of
+invisible cat.
+
+Vertical travel — jumping, pouncing, being carried — is the state machine's
+job. The frames carry the crouch, the tuck and the stretch; the shadow stays
+on the floor and shrinks.
 
 Tail-pose variants and the yawn used to come from a second tool that redrew
 regions of a finished frame. They are ordinary frames now: the rig expresses
