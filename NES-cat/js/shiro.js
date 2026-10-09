@@ -42,7 +42,8 @@
     _blinkNext: 3,
     _flourish: null,      /* a short idle flourish: glance / tail flick / yawn */
     _flourishGap: 5,      /* seconds until the next one is rolled */
-    _lift: 0,             /* px she is airborne (jump / pounce) */
+    _lift: 0,             /* px she is airborne (jump / pounce / carried) */
+    facing: 1,            /* profile only: 1 = right, -1 = mirrored */
     facing: 1,            /* 1 = right, -1 = mirrored */
     _squash: 0,         /* transient squash/stretch amount */
     _squashV: 0,
@@ -576,6 +577,24 @@
     return (f && f[name]) ? name : fallback;
   };
 
+  /* ---------- which view she is drawn in -------------------------------
+ *
+ * The two sprite views are one system. Front-on while she is stationary,
+ * because that is where her face and mood carry the most, and it is
+ * symmetric so it needs no mirroring. In profile while she is crossing the
+ * room or off the floor, because a front-facing sprite sliding left and
+ * right looks like moonwalking — in profile the stride reads, and she can
+ * be mirrored to face her direction of travel.
+ *
+ * Naming the states here keeps the rule in one place instead of scattering
+ * `if (side)` through frameFor(). Side frames are emitted with a `side_`
+ * prefix by the build tool. */
+  Shiro.SIDE_STATES = { walk: 1, jump: 1, pounce: 1 };
+
+  Shiro.isSide = function () {
+    return !!Shiro.SIDE_STATES[this._sm.state];
+  };
+
   Shiro.frameFor = function () {
     var st = this._sm.state;
     var t = this._sm.time;
@@ -598,18 +617,19 @@
 
     if (st === 'sleep') return (Math.sin(this._bob) > 0) ? 'sleep_0' : 'sleep_1';
     if (st === 'react') return (t < 0.16) ? 'react_0' : 'react_1';
-    if (st === 'walk') return 'walk_' + (Math.floor(t * 7) % 4);
+    /* travelling states are drawn in profile */
+    if (st === 'walk') return 'side_walk_' + (Math.floor(t * 7) % 4);
 
     if (st === 'jump') {
-      if (t < Bh.jumpDur * 0.22) return 'jump_0';
-      if (t < Bh.jumpDur * 0.5) return 'jump_1';
-      if (t < Bh.jumpDur * 0.78) return 'jump_2';
-      return 'jump_3';
+      if (t < Bh.jumpDur * 0.22) return 'side_jump_0';
+      if (t < Bh.jumpDur * 0.5) return 'side_jump_1';
+      if (t < Bh.jumpDur * 0.78) return 'side_jump_2';
+      return 'side_jump_3';
     }
     if (st === 'pounce') {
-      if (t < Bh.pounceDur * 0.3) return 'pounce_0';
-      if (t < Bh.pounceDur * 0.7) return 'pounce_1';
-      return 'pounce_2';
+      if (t < Bh.pounceDur * 0.3) return 'side_pounce_0';
+      if (t < Bh.pounceDur * 0.7) return 'side_pounce_1';
+      return 'side_pounce_2';
     }
     if (st === 'eat') return cyc(['eat_0', 'eat_1', 'eat_2', 'eat_1'], 0.25, 3.2);
     if (st === 'drink') return cyc(['drink_0', 'drink_1'], 0.2, 3.0);
@@ -673,8 +693,11 @@
     var ambient = light ? light.ambient : null;
     var amt = light ? light.ambientAmt : 0;
 
-    /* She is drawn front-on, so no horizontal flip is needed. Mid-air the
-     * shadow stays on the floor and shrinks, which is what sells the height. */
+    /* She has two views. The front view is symmetric, so it must NOT be
+     * flipped — mirroring it would only throw the tail to the other side.
+     * The profile view is authored facing right and is mirrored to face the
+     * way she is travelling. Mid-air the shadow stays on the floor and
+     * shrinks, which is what sells the height. */
     var lift = this._lift || 0;
     var air = U.clamp(lift / 26, 0, 1);
 
@@ -688,7 +711,8 @@
 
     NESCAT.Sprite.draw(g, this.sprite, this.frameFor(), this.x, this.y - lift, {
       ambient: ambient,
-      ambientAmt: amt
+      ambientAmt: amt,
+      flip: this.isSide() && this.facing < 0
     });
 
     this.drawParticles(g, true);
