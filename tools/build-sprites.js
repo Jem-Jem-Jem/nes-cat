@@ -423,11 +423,15 @@ function buildSideParts(o) {
   faceSide(G, hx, hy, o, pxIn);
   shadeBelow(G, headAll, hx, hy + 1.2, 'H');
 
-  /* paw pads on the two near feet, only where the paw is on the ground */
+  /* paw pads on the two near feet, only where the paw is on the ground.
+     * Clamped to the floor row: these are stamped directly rather than
+     * masked, so a hanging leg (carried) would otherwise print a pad on the
+     * very last row. */
   const pad = key => {
     const L = legOf(key);
     if (L.hide || (L.lift || 0) > 1.5) return;
-    px(G, L.x + o.bodyX - 0.5, Math.round(FLOOR - 2 - (L.lift || 0)), 'P');
+    const fy = Math.min(Math.round(FLOOR - 2 - (L.lift || 0)), 28);
+    px(G, L.x + o.bodyX - 0.5, fy, 'P');
   };
   pad('nearBack'); pad('nearFront');
 
@@ -508,11 +512,8 @@ function frames() {
   /* a yawn, used when she is low on energy and about to nap */
   pose('idle_yawn', { eyes: 'closed', mouth: 'open', headDY: 0.8 });
 
-  /* --- walk: a four-beat cycle, one paw up per beat --- */
-  pose('walk_0', { legPhase: 0, bodyDY: -1, tailSway: 1.0 });
-  pose('walk_1', { legPhase: 1, bodyDY: 0, tailSway: 1.5 });
-  pose('walk_2', { legPhase: 2, bodyDY: -1, tailSway: 1.0 });
-  pose('walk_3', { legPhase: 3, bodyDY: 0, tailSway: 0.5 });
+  /* --- walk is profile-only: a front-facing sprite sliding left and right
+     * looks like moonwalking, so these live under side_* below. --- */
 
   /* --- sit --- */
   const sitBase = { squash: 0.8 };
@@ -537,49 +538,26 @@ function frames() {
   pose('react_0', { eyes: 'happy', earPerk: 1, bodyDY: -1, squash: -0.4 });
   pose('react_1', { eyes: 'open', earPerk: 1, squash: 0 });
 
-  /* --- held: she is dangling from a hand. The state machine keeps cycling
-   * these while she is carried so she is never a frozen sprite. --- */
-  pose('held_0', { eyes: 'wide', earPerk: 1.2, bodyDY: 1.2, pawLift: -1.5, tailSway: 0 });
-  pose('held_1', { eyes: 'wide', earPerk: 1.2, bodyDY: 1.6, pawLift: -2.2, tailSway: -1.2 });
-  pose('held_2', { eyes: 'wide', earPerk: 1.0, bodyDY: 1.2, pawLift: -1.5, tailSway: 1.2 });
-
-  /* --- jump: the vertical travel is the state machine's job, these frames
-   * carry the crouch, the tuck and the stretch. --- */
-  pose('jump_0', { eyes: 'wide', earPerk: 1, bodyDY: 1.4, squash: 1.0 });
-  pose('jump_1', { eyes: 'wide', earPerk: 1.2, bodyDY: -0.5, squash: -0.6, pawLift: 3, tailUp: 0.5 });
-  pose('jump_2', { eyes: 'open', earPerk: 1.2, bodyDY: -1.0, squash: -1.0, pawLift: 2.5, tailUp: 0.4 });
-  pose('jump_3', { eyes: 'open', bodyDY: 0.8, squash: 0.9, pawLift: 0.5 });
-
-  /* --- eat / drink: head down at bowl height. Where the bowl is, is the
-   * state machine's job; these frames carry the head and the chewing. --- */
-  const atBowl = { bodyDY: 1.0, pawLift: 0.5 };
-  pose('eat_0', Object.assign({ eyes: 'open', mouth: 'open', headDY: 6.0 }, atBowl));
-  pose('eat_1', Object.assign({ eyes: 'closed', mouth: 'smile', headDY: 5.5 }, atBowl));
-  pose('eat_2', Object.assign({ eyes: 'closed', mouth: 'open', headDY: 6.0 }, atBowl));
-  pose('drink_0', Object.assign({ eyes: 'open', mouth: 'open', headDY: 7.0 }, atBowl));
-  pose('drink_1', Object.assign({ eyes: 'closed', mouth: 'pant', headDY: 6.5 }, atBowl));
-
-  /* --- groom / wash: sitting, head down to a raised paw --- */
-  const seated = { squash: 1.0, bodyDY: 1.2, pawLift: 3.5, tailUp: 0.3 };
-  pose('groom_0', Object.assign({ eyes: 'happy', mouth: 'open', headDY: 2.4 }, seated));
-  pose('groom_1', Object.assign({ eyes: 'open', mouth: 'smile', headDY: 1.8 }, seated));
-  pose('wash_0', Object.assign({ eyes: 'closed', mouth: 'open', headDY: 3.6 }, seated));
-  pose('wash_1', Object.assign({ eyes: 'closed', mouth: 'pant', headDY: 3.0 }, seated));
-
-  /* --- pounce: the yarn-ball lunge --- */
-  pose('pounce_0', { eyes: 'wide', earPerk: 1.2, bodyDY: 1.8, squash: 1.4, tailUp: 0.4 });
-  pose('pounce_1', { eyes: 'wide', earPerk: 1.4, bodyDY: -0.5, squash: -0.8, pawLift: 3.5, tailUp: 0.8 });
-  pose('pounce_2', { eyes: 'open', earPerk: 0.8, bodyDY: 0.8, squash: 0.8, pawLift: 0.5, tailSway: 1.4 });
-
-  /* --- cat tree: standing tall, batting the hanging toy --- */
-  pose('tree_0', { eyes: 'open', earPerk: 1.2, bodyDY: -0.6, pawLift: 2, tailUp: 0.3 });
-  pose('tree_1', { eyes: 'happy', earPerk: 1.6, bodyDY: -1.2, pawLift: 4, tailUp: 0.6 });
+  /* Everything below this line moved to the profile rig: held, jump, eat,
+   * drink, groom, wash, pounce and tree are all poses where what matters is
+   * her body reaching or bending somewhere, and a front-facing sprite
+   * cannot show it. They are authored under side_* below.
+   *
+   * Reinstating a front version is one pose() line — the rig still takes
+   * pawLift / headDY / mouth — but leaving unused frames in a generated file
+   * only invites confusion about which art is live. */
 
   /* ------------------------------------------------------------------
-   * Side view — the travelling states. Authored facing right; the runtime
-   * mirrors her when she heads left. Kept to the three states that cross
-   * the room or leave the floor, which are the ones a front-facing sprite
-   * cannot sell.
+   * Side view — everything whose meaning is in her BODY, not her face.
+   *
+   * A front-facing sprite cannot show a neck bending down to a bowl, a paw
+   * raised to a muzzle, a body reaching up at a toy, or legs hanging loose
+   * from a hand. Those are the poses that belong in profile, so they are
+   * authored here and named side_*. Authored facing right; mirrored at
+   * draw time.
+   *
+   * The front rig above keeps the states that are about her FACE — idle,
+   * sit, sleep, react — where the symmetry and the expression do the work.
    * ---------------------------------------------------------------- */
 
   /* walk: a real four-beat stride with four visible legs */
@@ -606,6 +584,45 @@ function frames() {
     tail: { lift: 3 } });
   side('pounce_2', { eyes: 'open', earPerk: 0.5, bodyY: 1.0, headDX: 1.5,
     legs: { nearFront: { lift: 1 }, farFront: { lift: 1 } }, tail: { sway: 1.8 } });
+
+  /* eat / drink: the neck bends down and forward to the bowl. `headDX`
+     carries the muzzle toward it; a front view could only drop the head
+     straight down, which reads as her staring at the floor. */
+  const atBowl = { bodyY: 1.0, headDX: 2.5 };
+  side('eat_0', Object.assign({ eyes: 'open', mouth: 'open', headDY: 5.5 }, atBowl));
+  side('eat_1', Object.assign({ eyes: 'closed', mouth: 'smile', headDY: 5.0 }, atBowl));
+  side('eat_2', Object.assign({ eyes: 'closed', mouth: 'open', headDY: 5.5 }, atBowl));
+  side('drink_0', Object.assign({ eyes: 'open', mouth: 'open', headDY: 6.5 }, atBowl));
+  side('drink_1', Object.assign({ eyes: 'closed', mouth: 'pant', headDY: 6.0 }, atBowl));
+
+  /* groom / wash: seated with a forepaw raised to her muzzle, back paws
+     tucked out of sight. The lifted paw is the whole point, so profile. */
+  const seated = {
+    bodyRX: 7.5, bodyRY: 6.0, bodyY: 2.0, headDX: -0.5,
+    legs: { farBack: { hide: true }, farFront: { hide: true }, nearBack: { hide: true }, nearFront: { lift: 4 } },
+    tail: { sway: 2.2, lift: -2.0, curl: 1.6 }
+  };
+  side('groom_0', Object.assign({ eyes: 'happy', mouth: 'open', headDY: 2.2 }, seated));
+  side('groom_1', Object.assign({ eyes: 'open', mouth: 'smile', headDY: 1.6 }, seated));
+  side('wash_0', Object.assign({ eyes: 'closed', mouth: 'open', headDY: 3.6 }, seated));
+  side('wash_1', Object.assign({ eyes: 'closed', mouth: 'pant', headDY: 3.0 }, seated));
+
+  /* cat tree: standing tall, reaching up at the hanging toy */
+  side('tree_0', { eyes: 'open', earPerk: 1.2, bodyY: -0.6, headDY: -2.0,
+    legs: { nearFront: { lift: 2 }, farFront: { lift: 2 } }, tail: { sway: 1.0, lift: 1 } });
+  side('tree_1', { eyes: 'happy', earPerk: 1.6, bodyY: -1.2, headDY: -3.0,
+    legs: { nearFront: { lift: 4 }, farFront: { lift: 4 }, nearBack: { lift: 1 } }, tail: { sway: 0.5, lift: 2 } });
+
+  /* held: dangling from a hand, legs hanging loose. In profile the drop of
+     the paws and the drag of the tail actually read; face-on they just look
+     like a standing cat with its feet off the ground. */
+  const dangling = l => ({
+    eyes: 'wide', earPerk: 1.2, bodyY: 1.4,
+    legs: { farBack: { lift: l }, farFront: { lift: l }, nearBack: { lift: l }, nearFront: { lift: l } }
+  });
+  side('held_0', Object.assign(dangling(-2), { tail: { sway: 0 } }));
+  side('held_1', Object.assign(dangling(-3), { bodyY: 1.8, earPerk: 1.4, tail: { sway: -1.2 } }));
+  side('held_2', Object.assign(dangling(-2), { earPerk: 1.0, tail: { sway: 1.2 } }));
 
   TAIL_MASKS = TAIL_OF;
   return out;
