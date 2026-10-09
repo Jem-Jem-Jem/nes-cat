@@ -4,6 +4,8 @@
 **Scope of this document:** The creative brief and technical plan for turning the empty `NES-cat` p5.js scaffold into a polished, character-led piece. **No code changes are made by this document.**
 
 > **Repo constraint (explicit):** This work stays **local**. Do **not** push to any remote. Commits are optional and only on Jem's say-so, until Jem decides otherwise.
+>
+> **Superseded — this is now a record of a constraint that has since been lifted.** Jem has decided otherwise: the work is published to a **public** GitHub repository. The constraint above governed the whole of the local build, and pushing was authorised separately, at the end. The two later mentions of it (§4 "Any push/deploy" and §14 "No push") were updated to match.
 
 ---
 
@@ -44,7 +46,7 @@ The piece is an **ambient companion**: gentle, self-running, mouse-reactive, and
 - Pixel-perfect NES hardware emulation (palette is NES-*inspired*, not exact).
 - External art assets (PNG spritesheets) — art is defined in code.
 - Network features, accounts, analytics.
-- Any push/deploy.
+- Any push/deploy. *(Superseded — see the note at the top: the repo was later published publicly.)*
 
 ---
 
@@ -203,7 +205,7 @@ NES-cat/
 
 - **Update `package.json`**: fix `name` (`nes-sprites` → `nes-cat`), `description`, and scripts (e.g. a `start` serving the folder); keep deps.
 - **Update `README.md`**: describe NES-cat, Shiro, controls, day/night, sound, and how to run locally.
-- No push. Commits only when Jem asks.
+- No push. Commits only when Jem asks. *(Superseded — see the note at the top: Jem authorised the push afterwards.)*
 
 ---
 
