@@ -1,0 +1,23 @@
+{
+  "name": "nes-sprites",
+  "version": "1.0.0",
+  "description": "sprites",
+  "keywords": [
+    "sprites"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "nes-sprites"
+  },
+  "license": "ISC",
+  "author": "jem-jem-jem",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "run"
+  },
+  "dependencies": {
+    "nes.css": "^2.2.1",
+    "p5": "^2.3.4"
+  }
+}
