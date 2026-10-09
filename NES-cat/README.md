@@ -92,19 +92,26 @@ npm run sprites:check     # verify every frame is 32x32 and flip-safe
 npm run sprites:build     # regenerate js/frames.js
 ```
 
-Shiro is drawn in **two views, and the split is deliberate** — it is one
-system, not two versions of the cat:
+Shiro is drawn in **two views, and the split is by what the pose has to
+show** — one system, not two versions of the cat:
 
-| View | Used for | Why |
+| View | States | Why |
 | --- | --- | --- |
-| **front** | every stationary state: idle, sit, sleep, eat, drink, groom, wash, held | She is facing you. Symmetric, so one frame reads as facing left *or* right with no second art and no flip — and it is where her face and mood do the most work. |
-| **side** | the states that cross the room or leave the floor: walk, jump, pounce | A front-facing sprite sliding left and right looks like moonwalking. In profile the stride reads, and she can be mirrored to face her direction of travel. |
+| **front** | idle, sit, sleep, react | The states that are about her *face*. She is facing you, the silhouette is mirror-symmetric so one frame reads as facing left *or* right with no second art and no flip, and the expression does the work. |
+| **side** | walk, jump, pounce, eat, drink, groom, wash, tree, held | Everything whose meaning is in her *body*. A front-facing sprite cannot show a neck bending down to a bowl, a paw raised to a muzzle, legs hanging loose from a hand, or a stride. |
+
+That is the reason the profile exists: it is not a second version of the
+cat, it is the only view in which those poses are legible.
 
 The rule lives in one place — `Shiro.SIDE_STATES` in `shiro.js` names the
-travelling states, and `frameFor()` maps them onto the `side_` frames. Both
+profile states, and `frameFor()` maps them onto the `side_` frames. Both
 rigs are built by the same tool and land in the same frame table; side
-frames carry a `side_` prefix and are authored facing right, mirrored at draw
-time.
+frames carry a `side_` prefix, are authored facing right, and are mirrored
+at draw time.
+
+Because fixtures are always approached from their left, `faceFixture()` pins
+her to facing right on arrival — otherwise arriving from the far side would
+mirror the profile sprite and she would perform with her back to the bowl.
 
 Because the front view is symmetric, `--check` enforces the mirror there,
 exempting only what is deliberate: the tail (read from the exact mask the
