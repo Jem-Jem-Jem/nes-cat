@@ -862,7 +862,7 @@
     /* she goes to the bowls on a gap, not on a meter climbing past a line.
      * The scene refills both, so this is a preference and not a need — which
      * is why the food weight is generous and the water weight is not. */
-    if (this._sinceFood > B.foodGap && Sc.food > 0.05) pool.push(['eat', 34]);
+    if (this._sinceFood > B.foodGap && Sc.food > 0.05) pool.push(['eat', 40]);
     else pool.push(['groom', B.wGroom]);
     /* Something just went past the window. She does not notice it every time
      * — that would be a cat with a reflex — but a sighting makes both looking

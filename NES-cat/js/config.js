@@ -22,15 +22,22 @@
 
     /* --- behaviour ---------------------------------------------------- */
     BEHAVIOR: {
-      wanderMin: 6.0,        /* s between idle -> walk rolls */
-      wanderMax: 13.0,
+      /* How long she thinks before doing something. Measured over five
+       * minutes of real running, the previous 6-13s left her standing in
+       * idle for 63% of it, which is right for an ambient companion and
+       * wrong for a box of animations — the point of this piece is what she
+       * does, and at that ratio a third of the repertoire never showed up.
+       * Faster decisions, and less sitting, and she spends her time doing
+       * it. */
+      wanderMin: 4.5,      /* s between idle -> walk rolls */
+      wanderMax: 9.5,
       walkMin: 2.6,
       walkMax: 5.0,
       /* logical px of ground covered per walk frame. Stepping is driven by
        * distance rather than by a clock so the paws never skate. */
       walkStride: 5.2,
-      sitMin: 5.0,
-      sitMax: 11.0,
+      sitMin: 4.0,
+      sitMax: 8.5,
       reactMin: 1.5,
       reactMax: 2.4,
       /* bump: the headbutt into a hand. A short press is one; holding the
@@ -86,10 +93,13 @@
       /* Odds that a wander roll becomes each activity. An activity gated on
        * a meter or on the room (eating needs food in the bowl) is skipped
        * when unavailable rather than re-rolled. */
-      /* Sitting carries the most weight on purpose: activities keep her
-       * crossing the room, and she needs to actually stand still for the
-       * idle flourishes (glance, tail flick, yawn) to be visible at all. */
-      wSit: 62,
+      /* Sitting carries the most weight of any single state on purpose:
+       * activities keep her crossing the room, and she does need to stand
+       * still for the idle flourishes (glance, tail flick, yawn) to be
+       * visible at all. It is still the largest number here — it is just no
+       * longer so far ahead of everything else that sitting is what she does
+       * most of the time. */
+      wSit: 40,
       wGroom: 16,
       wWatch: 22,
       wWash: 12,
@@ -123,8 +133,8 @@
         floor: 0.30        /* how worn out she gets before sleeping is a relief */
       },
       sinceSleepGap: 55,  /* s she must be up before a nap is on the cards */
-      foodGap: 75,         /* s before she looks for the food bowl */
-      drinkGap: 105,       /* s before she looks for the water bowl */
+      foodGap: 55,         /* s before she looks for the food bowl */
+      drinkGap: 95,        /* s before she looks for the water bowl */
 
       /* the hunt. A pounce sends the yarn rolling across the room, and a cat
        * that has just batted something does not sit down and admire it — she
