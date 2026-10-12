@@ -135,9 +135,19 @@ Choreography lives in `shiro.js`; `config.js` BEHAVIOR holds every duration
 and weight, so nothing about the feel needs touching code.
 
 **Turning.** `turn` plays the bridge between the two views: the pose she is
-leaving, two three-quarter frames, then the destination view. `startWalk()`
-pivots before setting off and `endWalk()` turns her back on arrival, so the
-most common transition in the piece never hard-cuts between views.
+leaving, two three-quarter frames, then the destination view. Because the two
+views are one system, *every* state authored in profile has to use it at both
+ends — the pivot into an activity and the turn back out of it. `startWalk()`
+does it before setting off, `endActivity()` on the way back, and `beginActivity()`
+on the way in to a bowl, a jump or a pounce. `endActivity()` anchors the turn on
+the frame she is actually holding rather than a name passed in, so it cannot
+drift when a pose is renamed.
+
+An activity that pivots on the way out pauses and then *resumes* rather than
+re-entering: `sm.resume()` restores a state without running its `enter()`, which
+is what keeps the approach bookkeeping (target, arrived flag) alive across the
+turn. Going through `sm.set()` would rebuild it and send her back to the start
+of the approach, so she would pivot forever.
 
 **Stationary.** `idle` (breathing, blinking, cursor gaze, plus the
 flourishes), `sit`, `sleep`, `react`, and two whole postures that are not
@@ -161,6 +171,13 @@ easy to break: `wake()` routes through `stretch`, because a cat gets up by
 stretching and asleep-to-awake is the most common transition in the piece;
 and `dragEnd()` lands her into `shake`, without which being put down just
 stopped hanging and read as a sprite swap.
+
+`npm run anim:check` drives the whole machine headlessly and fails on a view
+cut — a settled profile pose handing straight to a front one — as well as on
+a frame that does not resolve, so both ends of every activity stay bridged
+without anyone having to watch for it. `npm run anim:check -- --seq <state>`
+prints the frame sequence for one state, which is the quickest way to see
+whether a transition actually played.
 
 > **Two traps in this file.** States are invoked as
 > `enter(sm, previous, payload)` — a state that wants the payload must

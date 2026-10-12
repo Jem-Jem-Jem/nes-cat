@@ -115,6 +115,25 @@
 
         is: function (name) { return sm.state === name; },
 
+        /* Restore a state *without* entering it.
+         *
+         * `set()` runs enter() again, and enter() is where a state sets up its
+         * own bookkeeping — an activity's target, its arrived flag, which
+         * phase it is in. So a state that pauses to do something else (pivot
+         * into profile on the way to a bowl, say) and then comes back must not
+         * go through set(), or that bookkeeping is rebuilt from scratch and the
+         * state starts over. This is the pause/continue pair to set(): set()
+         * moves on, resume() comes back to exactly where it left off.
+         *
+         * `previous` is deliberately untouched — nothing was transitioned
+         * from, the machine is only being re-pointed at the state it was
+         * already running. */
+        resume: function (name) {
+          if (!spec[name] || name === sm.state) return;
+          sm.state = name;
+          sm.time = 0;
+        },
+
         update: function (dt) {
           sm.time += dt;
           var cur = spec[sm.state];

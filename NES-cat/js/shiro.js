@@ -40,6 +40,9 @@
 
     _blink: 0,
     _blinkNext: 3,
+    /* the frame currently on screen. Seeded because a transition can ask for it
+     * before anything has been drawn. See frameFor(). */
+    _shown: 'idle_open',
     _flourish: null,      /* a short idle flourish: glance / tail flick / yawn */
     _flourishGap: 5,      /* seconds until the next one is rolled */
     _wakeT: 0,            /* s of enforced wakefulness left after rousing */
@@ -148,15 +151,27 @@
 
       /* ---------- activities --------------------------------------------
        * Each activity has two phases: she walks to a fixture, then performs
-       * in place. `self._act` carries { target, dur } between them, so the
-       * approach and the performance share one state. */
+       * in place. `self._act` carries { target, dur, pivoted, arrived } between
+       * them, so the approach and the performance share one state.
+       *
+       * Every one of them is authored in profile, so every one of them has to
+       * bridge both ends of the activity: arrive() pivots on the way out, and
+       * endActivity() turns her back to face the room on the way back in. A
+       * state that skipped either would pop between the two views.
+       *
+       * groom and wash have no fixture — she does them wherever she is standing
+       * — but they still go through arrive() with target null, because a cat
+       * washing her face has to be in profile to raise a paw to it. */
 
       jump: {
-        enter: function () {
-          self._act = { target: null, dur: B.jumpDur, done: false };
+        enter: function (sm, from) {
+          self.beginActivity(sm, from, { target: null, dur: B.jumpDur });
           self._lift = 0;
         },
         update: function (dt, s) {
+          /* target null: no fixture to walk to, but arrive() still pivots —
+           * a jump is profile art, seen from the side */
+          if (!self.arrive(dt, self._act.target)) return;
           var p = U.clamp(s.time / self._act.dur, 0, 1);
           /* a sine arc: up fast, hang, come down */
           self._lift = Math.sin(p * Math.PI) * B.jumpHeight;
@@ -167,16 +182,17 @@
               NESCAT.Scene.pokeToy(11);
             }
           }
-          if (p >= 1) { self._lift = 0; sm.set('idle'); }
+          if (p >= 1) self.endActivity();
         }
       },
 
       eat: {
-        enter: function () {
-          self._act = { target: NESCAT.Scene.BOWL_FOOD_X - 18, dur: B.eatDur, phase: 0 };
+        enter: function (sm, from) {
+          self.beginActivity(sm, from,
+            { target: NESCAT.Scene.BOWL_FOOD_X - 18, dur: B.eatDur, phase: 0 });
         },
         update: function (dt, s) {
-          if (!self.arrive(dt, self._act.target, s)) return;
+          if (!self.arrive(dt, self._act.target)) return;
           if (self._act.phase === 0) {
             self._act.phase = 1;
             self._sm.time = 0;
@@ -185,16 +201,17 @@
             self.addMeter('eat');
             if (self.onSay) self.onSay('nom');
           }
-          if (s.time > self._act.dur) sm.set('idle');
+          if (s.time > self._act.dur) self.endActivity();
         }
       },
 
       drink: {
-        enter: function () {
-          self._act = { target: NESCAT.Scene.BOWL_WATER_X - 18, dur: B.drinkDur, phase: 0 };
+        enter: function (sm, from) {
+          self.beginActivity(sm, from,
+            { target: NESCAT.Scene.BOWL_WATER_X - 18, dur: B.drinkDur, phase: 0 });
         },
         update: function (dt, s) {
-          if (!self.arrive(dt, self._act.target, s)) return;
+          if (!self.arrive(dt, self._act.target)) return;
           if (self._act.phase === 0) {
             self._act.phase = 1;
             self._sm.time = 0;
@@ -202,52 +219,60 @@
             NESCAT.Scene.takeWater();
             self.addMeter('drink');
           }
-          if (s.time > self._act.dur) sm.set('idle');
+          if (s.time > self._act.dur) self.endActivity();
         }
       },
 
+      /* groom and wash have nowhere to walk to — she does them where she
+       * stands. target null means arrive() has no distance to close, so it
+       * pivots on the first frame and reports arrival on the second. */
       groom: {
-        enter: function () {
-          self._act = { target: null, dur: B.groomDur, phase: 0 };
+        enter: function (sm, from) {
+          self.beginActivity(sm, from, { target: null, dur: B.groomDur, phase: 0 });
         },
         update: function (dt, s) {
-          if (s.time > self._act.dur) sm.set('idle');
+          if (!self.arrive(dt, self._act.target)) return;
+          if (s.time > self._act.dur) self.endActivity();
         }
       },
 
       wash: {
-        enter: function () {
-          self._act = { target: null, dur: B.washDur, phase: 0 };
+        enter: function (sm, from) {
+          self.beginActivity(sm, from, { target: null, dur: B.washDur, phase: 0 });
         },
         update: function (dt, s) {
-          if (s.time > self._act.dur) sm.set('idle');
+          if (!self.arrive(dt, self._act.target)) return;
+          if (s.time > self._act.dur) self.endActivity();
         }
       },
 
       tree: {
-        enter: function () {
-          self._act = { target: NESCAT.Scene.CAT_TREE_X - 22, dur: B.treeDur, phase: 0 };
+        enter: function (sm, from) {
+          self.beginActivity(sm, from,
+            { target: NESCAT.Scene.CAT_TREE_X - 22, dur: B.treeDur, phase: 0 });
         },
         update: function (dt, s) {
-          if (!self.arrive(dt, self._act.target, s)) return;
+          if (!self.arrive(dt, self._act.target)) return;
           if (self._act.phase === 0) {
             self._act.phase = 1;
             self._sm.time = 0;
             self.faceFixture();
             NESCAT.Scene.pokeToy(7);
           }
-          if (s.time > self._act.dur) sm.set('idle');
+          if (s.time > self._act.dur) self.endActivity();
         }
       },
 
       pounce: {
-        enter: function () {
-          self._act = { target: NESCAT.Scene._yarnX - 26, dur: B.pounceDur, phase: 0, hit: false };
+        enter: function (sm, from) {
+          self.beginActivity(sm, from, {
+            target: NESCAT.Scene._yarnX - 26, dur: B.pounceDur, phase: 0, hit: false
+          });
           self._lift = 0;
         },
         update: function (dt, s) {
           if (self._act.phase === 0) {
-            if (!self.arrive(dt, self._act.target, s)) return;
+            if (!self.arrive(dt, self._act.target)) return;
             self._act.phase = 1;
             self._sm.time = 0;
             self.faceFixture();
@@ -260,7 +285,7 @@
             NESCAT.Scene.nudgeYarn(self.x + 16, 24);
             self.addMeter('play');
           }
-          if (p >= 1) { self._lift = 0; sm.set('idle'); }
+          if (p >= 1) self.endActivity();
         }
       },
 
@@ -284,13 +309,17 @@
             to: to,
             from: p.from || (to === 'side' ? 'idle_open' : 'side_stand_0'),
             dur: B.turnDur,
-            then: p.then || 'idle'
+            then: p.then || 'idle',
+            /* resume: come back to the activity that asked for this pivot
+             * without re-entering it, so its approach bookkeeping survives */
+            resume: !!p.resume
           };
           /* the whole sequence mirrors together, so decide direction once */
           if (p.facing) self.facing = p.facing;
         },
         update: function (dt, s) {
           if (s.time < self._turn.dur) return;
+          if (self._turn.resume) { sm.resume(self._turn.then); return; }
           sm.set(self._turn.then);
         }
       },
@@ -321,17 +350,6 @@
             return;
           }
           if (s.time >= B.turnDur) sm.set('idle');
-        }
-      },
-
-      /* resume: hand control back to the activity that paused to pivot. Its
-       * _act (target, arrived flag, phase) is untouched, so it carries on
-       * from where it stopped rather than restarting its approach. */
-      resume: {
-        update: function () {
-          var to = self._resumeTo || 'idle';
-          self._resumeTo = null;
-          sm.set(to);
         }
       },
 
@@ -414,35 +432,93 @@
     sm = this._sm = NESCAT.Sprite.makeStateMachine(states, 'idle');
   };
 
-  /* Walk toward a fixture until she is close enough to act on it.
-   Returns true once arrived (and latches, so the caller can then run its
-   performance phase without re-walking every frame).
+  /* Walk toward a fixture until she is close enough to act on it. Returns
+   * true once arrived (and latches, so the caller can then run its
+   * performance phase without re-walking every frame).
+   *
+   * Approaching a bowl means crossing the room in profile, so if she is still
+   * front-on she pivots first. Dropping straight into a walk frame would pop
+   * the view, and a cat that slides off in profile with no pivot reads as a
+   * sprite swap rather than a cat leaving.
+   *
+   * The pivot used to be set up here and never taken: this assigned
+   * `this._turn` and returned, but nothing ever called sm.set('turn', ...), so
+   * the machine stayed on the activity and she simply walked away in profile
+   * with no bridge drawn at all. Every approach was a cut.
+   *
+   * Coming back uses sm.resume() rather than sm.set(), because enter() rebuilds
+   * _act — the target and the arrived flag — and re-running it would send her
+   * back to the start of the approach, so she would pivot forever. */
+  Shiro.arrive = function (dt, targetX) {
+    var act = this._act;
+    if (act.arrived) return true;
+    /* no fixture to walk to: she is already where she needs to be */
+    if (targetX == null) { act.arrived = true; return true; }
 
-   Approaching a bowl means crossing the room in profile, so if she is still
-   front-on she pivots first. Dropping straight into a walk frame would pop
-   the view, and a cat that slides off in profile with no pivot reads as a
-   sprite swap rather than a cat leaving. */
-  Shiro.arrive = function (dt, targetX, s) {
-    if (this._act.arrived) return true;
     var dx = targetX - this.x;
     if (Math.abs(dx) <= CFG.BEHAVIOR.arriveEps) {
-      this._act.arrived = true;
+      act.arrived = true;
       return true;
     }
-    var dir = dx < 0 ? -1 : 1;
-    this.facing = dir;
-    /* one pivot on the way out, not on every frame */
-    if (!this._act.turned) {
-      this._act.turned = true;
-      if (!this.isSide()) {
-        this._resumeTo = this._sm.state;
-        this._turn = { to: 'side', from: 'idle_open', dur: CFG.BEHAVIOR.turnDur, then: 'resume' };
-        return false;
-      }
-    }
+    this.facing = dx < 0 ? -1 : 1;
     this.x += Math.sign(dx) * CFG.BEHAVIOR.approachSpeed * dt;
     this._bob += dt * 11;
     return false;
+  };
+
+  /* Begin an activity: stash its bookkeeping and, if it needs one, turn into
+   * profile immediately.
+   *
+   * The pivot belongs here rather than on the activity's first update, because
+   * the first update is already a frame too late. rollNext() hands off from
+   * idle to eat in the middle of an update, and the frame drawn at the end of
+   * that same frame is whatever the new activity draws — a profile pose where a
+   * front one was on screen a moment earlier. Turning from enter() means the
+   * first frame of an activity is the bridge, so the handoff is never a cut.
+   *
+   * `from` is the state she is coming from, not the one she has entered. That
+   * is the only honest way to ask whether she needs to pivot: isSide() cannot
+   * answer it from inside the activity, because poseFor() is already returning
+   * that activity's own side frames and always will.
+   *
+   * Coming back uses sm.resume() rather than sm.set(), because enter() rebuilds
+   * _act — the target and the arrived flag — and re-running it would send her
+   * back to the start of the approach, so she would pivot forever. */
+  Shiro.beginActivity = function (sm, from, act) {
+    act.from = from;
+    this._act = act;
+    if (Shiro.isSideState(from)) return act;
+    sm.set('turn', {
+      to: 'side',
+      /* hold the pose she is actually on screen in, not the one this activity
+       * would draw — see frameFor() and `_shown` */
+      from: this._shown || 'idle_open',
+      /* a null target means she performs where she stands, so there is no
+       * direction of travel to point her in — keep whichever way she is */
+      facing: act.target == null ? this.facing : (act.target < this.x ? -1 : 1),
+      then: sm.state,             /* the activity being entered */
+      resume: true
+    });
+    return act;
+  };
+
+  /* Hand back to the room, turning to face it first.
+   *
+   * Every profile activity used to finish with a bare sm.set('idle'), which put
+   * a front pose on screen one frame after a side one. That is the exact pop
+   * endWalk() was written to avoid on foot, and it fired on every activity in
+   * the piece — measured as seven view cuts.
+   *
+   * The turn is anchored on the frame she is *currently holding* rather than a
+   * name passed in, so it cannot drift when a pose is renamed, and an activity
+   * that ends mid-cycle hands over from mid-cycle. The isSide() guard keeps it
+   * idempotent: a state that is already front-on just finishes. */
+  Shiro.endActivity = function (then) {
+    var next = then || 'idle';
+    this._lift = 0;
+    var frame = this.frameFor();
+    if (frame.indexOf('side_') !== 0) { this._sm.set(next); return; }
+    this._sm.set('turn', { to: 'front', from: frame, facing: this.facing, then: next });
   };
 
   /* ---------- approach ---------------------------------------------- *
@@ -466,18 +542,16 @@
     this.facing = dir;
     this._pendingWalk = t;
     if (this.isSide()) { this._sm.set('walk', { x: t }); return; }
-    this._sm.set('turn', { to: 'side', from: 'idle_open', facing: dir, then: 'walk' });
+    /* hold the pose she is actually in, not a hardcoded 'idle_open' — she may
+     * be setting off from a sit, a stretch or the end of a shake */
+    this._sm.set('turn', { to: 'side', from: this._shown || 'idle_open', facing: dir, then: 'walk' });
   };
 
-  /* Arrive at the end of a walk, turning back to face the room first. */
+  /* Arrive at the end of a walk, turning back to face the room first.
+   * Identical to what every activity now does on the way out, so it is the
+   * same call — the walk is just another thing happening in profile. */
   Shiro.endWalk = function () {
-    if (this.isSide()) {
-      this._sm.set('turn', {
-        to: 'front', from: 'side_walk_0', facing: this.facing, then: 'idle'
-      });
-    } else {
-      this._sm.set('idle');
-    }
+    this.endActivity();
   };
 
   Shiro.rollNext = function () {
@@ -799,6 +873,21 @@
 
   /* ---------- frame choice ------------------------------------------------ */
 
+  /* frameFor() is the hot path: draw() calls it, isSide() calls it, and the
+   * animation code calls it to decide what a turn should hold on to. So it is
+   * a thin wrapper around the real work, and its one extra job is to remember
+   * what was last asked for.
+   *
+   * That memory is what lets a transition anchor on the pose that was actually
+   * on screen. By the time an activity has been entered, poseFor() is already
+   * answering with that activity's own frames — asking it "what were you
+   * showing before this?" gets the wrong answer by construction. `this._shown`
+   * is the only place that question has a truthful answer. */
+  Shiro.frameFor = function () {
+    this._shown = this.poseFor();
+    return this._shown;
+  };
+
   /* Flourish frames are composed as base + suffix (e.g. 'sit_closed_tailUp1').
    * That is convenient but fragile: a blink landing mid-flourish asks for a
    * combination that must exist. Resolve every name against the real frame
@@ -838,6 +927,21 @@
     turn: 1, watch: 1
   };
 
+  /* Two different questions about the view, and they are not interchangeable:
+   *
+   *   isSide()       is the frame she is about to draw profile art? Correct at
+   *                  draw time and for deciding whether to flip.
+   *   isSideState()  is this *state* authored in profile? The only question
+   *                  that can be asked on the way into an activity, because
+   *                  once she is inside it frameFor() is already answering
+   *                  with that activity's own side frames.
+   *
+   * Keeping both means the rule still lives in one table, and the distinction
+   * is written down where the bug was, rather than rediscovered as a pop. */
+  Shiro.isSideState = function (name) {
+    return !!Shiro.SIDE_STATES[name];
+  };
+
   /* Whether the frame she is about to draw is profile art. Kept as a
    * helper because the view is now decided per frame, not per state. */
   Shiro.isSide = function () {
@@ -845,7 +949,7 @@
     return this.frameFor().indexOf('side_') === 0;
   };
 
-  Shiro.frameFor = function () {
+  Shiro.poseFor = function () {
     /* `self` declared up front, not mid-function. In a browser an
        out-of-scope `self` silently resolves to `window` rather than
        throwing a ReferenceError, which is exactly how this file managed to
@@ -874,11 +978,18 @@
         ? 'side_held_calm_0' : 'side_held_calm_1';
     }
 
-    /* A short leading frame then a two-frame loop reads as a cycle without
-     * needing a separate "loop start" per state. */
+    /* Hold the first frame for `lead` seconds, then loop over *every* frame.
+     *
+     * The loop must span the whole list, not frames[1..]. Cycling len-1 entries
+     * quietly drops the first pose from the loop and leaves it stranded as the
+     * lead-in, which breaks two states at once: a two-frame cycle collapses to
+     * a single held frame with no motion in it at all (drinking), and a
+     * palindromic one like [down, up, down, up] wraps so the repeated pose
+     * lands next to itself and the cycle reads as a hitch (eating).
+     */
     function cyc(frames, lead, rate) {
       if (t < lead) return frames[0];
-      return frames[1 + (Math.floor((t - lead) * rate) % (frames.length - 1))];
+      return frames[Math.floor((t - lead) * rate) % frames.length];
     }
 
     if (st === 'sleep') {

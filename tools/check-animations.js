@@ -124,7 +124,7 @@ const CASES = [
   { state: 'react', secs: 3, payload: { say: 'pet' } },
   { state: 'walk', secs: 8, payload: { x: 40 } },
   { state: 'jump', secs: 1.4 },
-  { state: 'pounce', secs: 1.6, before: s => { s.x = 200; } },
+  { state: 'pounce', secs: 4, before: s => { s.x = 200; } },
   { state: 'eat', secs: 8 },
   { state: 'drink', secs: 7 },
   { state: 'groom', secs: 5 },
@@ -143,8 +143,55 @@ const argv = process.argv.slice(2);
 const wantSoak = argv.includes('--soak');
 const soakSeconds = wantSoak ? Number(argv[argv.indexOf('--soak') + 1] || 600) : 0;
 const wantTrace = argv.includes('--trace');
+const wantSeq = argv.includes('--seq');
+
+/* --seq <state>: print the raw frame sequence for one state, in order and
+ * with repeats, because a de-duplicated trace cannot show whether a bridge
+ * actually played or whether two identical frames were drawn back to back. */
+function dumpSequence(state, secs) {
+  const { NESCAT, Scene } = loadShiro();
+  const Shiro = NESCAT.Shiro;
+  Shiro.init();
+  Scene._yarnX = 104; Scene.food = 1; Scene.water = 1;
+  Shiro._sm.set('idle');
+  Shiro.x = 150;
+  const c = CASES.find(k => k.state === state);
+  if (c && c.before) { Shiro.x = 0; c.before(Shiro); }
+  Shiro._sm.set(state, (c && c.payload) || {});
+  const frames = [];
+  const states = [];
+  const steps = Math.round((secs || (c && c.secs) || 6) / DT);
+  for (let i = 0; i < steps; i++) {
+    Shiro.update(DT);
+    states.push(Shiro._sm.state);
+    frames.push(Shiro.frameFor());
+  }
+  console.log('\n== ' + state + ' raw sequence ==');
+  /* collapse runs: at 60fps an un-collapsed sequence is 300 tokens of noise,
+   * and the thing worth reading is the order and the dwell on each pose */
+  console.log('  ' + collapse(states));
+  console.log('  ' + collapse(frames));
+  const bad = frames.filter(f => !Shiro.sprite.frames[f]);
+  if (bad.length) console.log('  MISSING: ' + [...new Set(bad)].join(' '));
+}
+
+/* "a a a b b c" -> "a x3 b x2 c" */
+function collapse(list) {
+  const out = [];
+  for (const v of list) {
+    const last = out[out.length - 1];
+    if (last && last.v === v) last.n++;
+    else out.push({ v, n: 1 });
+  }
+  return out.map(o => (o.n > 1 ? o.v + ' x' + o.n : o.v)).join(' ');
+}
 
 function main() {
+  if (wantSeq) {
+    const i = argv.indexOf('--seq');
+    dumpSequence(argv[i + 1], Number(argv[i + 2]) || 0);
+    return;
+  }
   const { NESCAT, Scene, calls } = loadShiro();
   const Shiro = NESCAT.Shiro;
   Shiro.init();
