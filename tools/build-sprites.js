@@ -894,11 +894,20 @@ function frames() {
   side('knead_0', Object.assign({ headDY: 4.0 }, knead(0, -0.6)));    /* paw pushed out */
   side('knead_1', Object.assign({ headDY: 3.4 }, knead(3.4, 0.2)));   /* paw drawn back */
 
-  /* cat tree: standing tall, reaching up at the hanging toy */
+  /* cat tree: standing tall, reaching up at the hanging toy.
+   *
+   * Three frames for the same reason scratch has three: a two-frame loop
+   * alternates between two extremes and reads as a flicker, and what it leaves
+   * out is the paw on its way back down. The middle frame is that, and it is
+   * what makes a bat look struck rather than swapped. */
   side('tree_0', { eyes: 'open', earPerk: 1.2, bodyY: -0.6, headDY: -2.0,
     legs: { nearFront: { lift: 2 }, farFront: { lift: 2 } }, tail: { sway: 1.0, lift: 1 } });
   side('tree_1', { eyes: 'happy', earPerk: 1.6, bodyY: -1.2, headDY: -3.0,
     legs: { nearFront: { lift: 4 }, farFront: { lift: 4 }, nearBack: { lift: 1 } }, tail: { sway: 0.5, lift: 2 } });
+  /* halfway between the two, not a copy of either: the body is still up, the
+   * paw is still off the floor, and the head has already come off the toy */
+  side('tree_2', { eyes: 'happy', earPerk: 1.4, bodyY: -0.9, headDY: -2.5,
+    legs: { nearFront: { lift: 3 }, farFront: { lift: 3 }, nearBack: { lift: 0.5 } }, tail: { sway: 0.75, lift: 1.5 } });
 
   /* held: dangling from a hand, legs hanging loose. In profile the drop of
      the paws and the drag of the tail actually read; face-on they just look

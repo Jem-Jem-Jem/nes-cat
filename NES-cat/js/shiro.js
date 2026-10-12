@@ -1556,7 +1556,22 @@
     if (st === 'drink') return cyc(['side_drink_0', 'side_drink_1'], 0.2, 3.0);
     if (st === 'groom') return (Math.sin(t * 2.2) > 0) ? 'side_groom_0' : 'side_groom_1';
     if (st === 'wash') return (Math.sin(t * 2.6) > 0) ? 'side_wash_0' : 'side_wash_1';
-    if (st === 'tree') return (Math.sin(t * 1.9) > 0) ? 'side_tree_0' : 'side_tree_1';
+    /* Three frames rather than two, for the reason scratch has three: a
+     * two-frame loop hands you the top of the reach and the bottom of it and
+     * nothing in between, which at a loop rate reads as a flicker. The paw
+     * coming back down is what is missing, and that is the third frame.
+     *
+     * The thresholds are +/-0.5 rather than 0, and that is arithmetic rather
+     * than taste: a sine spends longer near its extremes than near its middle,
+     * so 0 splits the cycle in two halves but 0.5 is the value that splits it
+     * three ways evenly — each frame gets exactly a third of the period, and
+     * the extremes stop being the only two things anybody sees. */
+    if (st === 'tree') {
+      var tb = Math.sin(t * 1.9);
+      if (tb > 0.5) return 'side_tree_1';
+      if (tb < -0.5) return 'side_tree_0';
+      return 'side_tree_2';
+    }
     if (st === 'scratch') {
       /* three frames rather than two: at raking speed a two-frame loop is a
        * flicker, and the third frame is the weight going the other way */
