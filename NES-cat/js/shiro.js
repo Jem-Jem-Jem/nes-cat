@@ -2,7 +2,14 @@
  * NES-cat — shiro.js
  *
  * Shiro: the cat. Owns her position, her state machine (idle / walk / sit /
- * sleep / react), her Mood-Energy-Hunger meters, and her particles.
+ * sleep / react and a good many more), and her particles.
+ *
+ * There are no meters. What used to be three bars was also the only thing
+ * gating half her behaviour, so it has been replaced rather than deleted —
+ * see BEHAVIOR.awake and the gaps beside it in config.js, and rollNext() for
+ * how they are read. The short version: she sleeps because it is night and
+ * she has been up a while, and she eats because her bowl has been going a
+ * while. Both reasons are visible in the room.
  *
  * Interaction entry points (called by input.js):
  *   Shiro.petStart() / Shiro.petStop() / Shiro.petTick(dt)
@@ -28,15 +35,23 @@
     sprite: null,
     x: 150,
     y: 0,
-    meters: { mood: 0.74, energy: 0.66, hunger: 0.22 },
     look: 0,
-    facing: 1,          /* 1 = facing viewer (we never flip; kept for the API) */
     particles: [],
     onSay: null,        /* set by ui.js */
 
     /* interaction flags (driven by input.js) */
     petting: false,
     dragging: false,
+
+    /* What drives her, now there are no meters. Three running gaps since she
+     * last did each thing, and how awake she currently is. Nothing here is
+     * displayed and nothing here is saved: they are a running account of the
+     * clock, and the clock is what a visitor can actually see. */
+    _awake: 1,             /* 1 wide awake, 0 worn out */
+    _sinceSleep: 0,        /* s since she last got up */
+    _sinceFood: 0,         /* s since she last ate */
+    _sinceWater: 0,        /* s since she last drank */
+    _napFor: 0,            /* s she intends to sleep for once she decides */
 
     _blink: 0,
     _blinkNext: 3,
@@ -45,10 +60,12 @@
     _shown: 'idle_open',
     _flourish: null,      /* a short idle flourish: glance / tail flick / yawn */
     _flourishGap: 5,      /* seconds until the next one is rolled */
-    _wakeT: 0,            /* s of enforced wakefulness left after rousing */
     _lift: 0,             /* px she is airborne (jump / pounce / carried) */
-    facing: 1,            /* profile only: 1 = right, -1 = mirrored */
-    facing: 1,            /* 1 = right, -1 = mirrored */
+    /* profile only: 1 = right, -1 = mirrored. The front view is symmetric and
+     * is never flipped, so this only ever changes which way a side_ frame
+     * faces. (This used to be declared three times in this literal, with two
+     * different comments.) */
+    facing: 1,
     _squash: 0,         /* transient squash/stretch amount */
     _squashV: 0,
     _wander: 0,
@@ -126,16 +143,21 @@
       sleep: {
         enter: function () {
           self._squash = 0.5;
+          /* How long she means to stay down is decided now, once, from how
+           * worn out she was when she sat down — not re-decided every frame.
+           * A night is long and a daytime doze is short, and which of the two
+           * this is is visible in the window behind her. */
+          self._napFor = NESCAT.Scene.isNight
+            ? U.rand(70, 150)
+            : U.rand(14, 30);
           say('sleepy');
         },
         update: function (dt, s) {
           self._bob += dt * 2.0;
-          /* regenerate energy, wake when rested, disturbed, or daytime */
-          var m = CFG.METERS;
-          self.meters.energy += m.sleep.energy * dt;
-          self.meters.mood += m.sleep.mood * dt;
-          self.meters.hunger += m.sleep.hunger * dt;
-          if (self.petting || self.meters.energy > 0.96) { self.wake(); return; }
+          /* woken by being disturbed, by the nap running out, or by morning
+           * arriving — the last one so that a room left open overnight does
+           * not have her asleep in daylight at eight in the morning */
+          if (self.petting || s.time > self._napFor) { self.wake(); return; }
           if (!NESCAT.Scene.isNight && U.chance(dt * 0.05)) { self.wake(); return; }
           if (U.chance(dt * 0.6) && NESCAT.Scene.isNight) self.spawn('zzz');
         }
@@ -204,7 +226,7 @@
             self._sm.time = 0;
             self.faceFixture();
             NESCAT.Scene.takeFood();
-            self.addMeter('eat');
+            self.fed('food');
             if (self.onSay) self.onSay('nom');
           }
           if (s.time > self._act.dur) self.endActivity();
@@ -223,7 +245,7 @@
             self._sm.time = 0;
             self.faceFixture();
             NESCAT.Scene.takeWater();
-            self.addMeter('drink');
+            self.fed('water');
           }
           if (s.time > self._act.dur) self.endActivity();
         }
@@ -289,11 +311,10 @@
           if (p > 0.45 && !self._act.hit) {
             self._act.hit = true;
             NESCAT.Scene.nudgeYarn(self.x + 16, 24);
-            self.addMeter('play');
           }
           if (p < 1) return;
           /* she connected with it, so she goes after it — see chase */
-          if (self._act.hit && self._hunt < B.chaseMax && self.meters.energy > 0.2) {
+          if (self._act.hit && self._hunt < B.chaseMax && self._awake > 0.3) {
             self._sm.set('chase');
             return;
           }
@@ -355,7 +376,7 @@
           if (!self.arrive(dt, self._act.target, B.chaseSpeed)) return;
           /* there: one more go at it, or lose interest and go back to the room */
           self._hunt = (self._hunt || 0) + 1;
-          if (self._hunt < B.chaseMax && self.meters.energy > 0.2) {
+          if (self._hunt < B.chaseMax && self._awake > 0.3) {
             self._sm.set('pounce', {});
             return;
           }
@@ -713,13 +734,14 @@
     var Sc = NESCAT.Scene;
     var night = Sc.isNight;
 
-    /* How tired she is: 0 at sleepEnergyMax, 1 at flat. Sleeping is scaled
-     * by this rather than rolled flat, so a rested cat never drops off
-     * regardless of the hour — which is what stopped the sleep/wake loop. */
-    var tired = 1 - U.clamp(this.meters.energy / B.sleepEnergyMax, 0, 1);
-    var sleepChance = (night ? B.sleepChanceNight : B.sleepChanceDay) * tired;
-    /* and she has been up long enough to want to lie down again */
-    if (this._wakeT > 0) sleepChance = 0;
+    /* Sleeping is scaled by how worn out she is, so a cat who has just woken
+     * never drops straight back off at three in the morning — the same
+     * problem the old energy meter was solving, solved by not pretending she
+     * has a reserve to spend. And nothing at all is on the cards until she has
+     * been up long enough to want to lie down again. */
+    var worn = 1 - U.clamp((this._awake - B.awake.floor) / (1 - B.awake.floor), 0, 1);
+    var sleepChance = (night ? B.sleepChanceNight : B.sleepChanceDay) * worn;
+    if (this._sinceSleep < B.sinceSleepGap) sleepChance = 0;
 
     var r = Math.random();
     if (r < sleepChance) { this._sm.set('sleep'); return; }
@@ -736,34 +758,45 @@
      * Unavailable activities are left out rather than re-rolled, so a roll
      * never turns into "walk to the bowl, find it empty". */
     var pool = [['sit', B.wSit]];
-    /* `hunger` rises as she gets hungry, so she looks for food once it
-     * climbs past the threshold (and only if the bowl is not empty). */
-    if (this.meters.hunger > B.hungryBelow && Sc.food > 0.05) pool.push(['eat', 30]);
+    /* she goes to the bowls on a gap, not on a meter climbing past a line.
+     * The scene refills both, so this is a preference and not a need — which
+     * is why the food weight is generous and the water weight is not. */
+    if (this._sinceFood > B.foodGap && Sc.food > 0.05) pool.push(['eat', 34]);
     else pool.push(['groom', B.wGroom]);
     /* turning to look at something without walking over to it */
     pool.push(['watch', B.wWatch]);
     /* idle postures: a stretch and a loaf are different from sitting */
     pool.push(['stretch', B.wStretch]);
-    if (this.meters.energy > 0.45) {
-      /* A cat tramples a spot before lying down on it, and the loaf is where
-       * she is going to be lying down. So a loaf is sometimes preceded by a
-       * circle — the settle-in is the part that makes the loaf read as
-       * having been chosen rather than arrived at. */
+    /* A loaf is a comfortable thing to do, and comfort follows the clock: in
+     * the evening and after a long day of being awake she is happy to settle,
+     * at three in the morning she is too tired for it. So this is gated on
+     * how awake she is, exactly as the energy meter used to be — the gate is
+     * real, only the thing being measured is no longer shown.
+     *
+     * And a cat tramples a spot before lying down on it, so a loaf is
+     * sometimes preceded by a circle: the settle-in is what makes the loaf
+     * read as having been chosen rather than arrived at. */
+    if (this._awake > 0.45) {
       if (U.chance(B.circleChance)) pool.push(['circle', B.wLoaf]);
       else pool.push(['loaf', B.wLoaf]);
     }
     pool.push(['knead', B.wKnead]);
-    /* something caught her ear — more likely when she is wide awake */
-    if (this.meters.energy > 0.6) pool.push(['alert', B.wAlert]);
-    if (this.meters.energy > 0.3) pool.push(['wash', B.wWash]);
-    if (Sc.water > 0.05) pool.push(['drink', 18]);
+    /* Something caught her ear. A cat that has just woken is not interested
+     * in what it heard, and neither is one that has been up all night, so
+     * this is offered by how awake she is rather than by a flat weight. */
+    if (this._awake > 0.6) pool.push(['alert', B.wAlert]);
+    if (this._awake > 0.3) pool.push(['wash', B.wWash]);
+    if (this._sinceWater > B.drinkGap && Sc.water > 0.05) pool.push(['drink', 22]);
+    else if (Sc.water > 0.05) pool.push(['drink', 8]);
     if (Math.abs(this.x - Sc.CAT_TREE_X) < B.treeNearX) pool.push(['tree', B.wTree]);
     else pool.push(['jump', B.wJump]);
     /* the yarn gets two entries: a deliberate stalk-and-pounce, and the
      * impulsive lunge she does when she is already close and cannot be
-     * bothered with the suspense */
-    pool.push(['stalk', B.wStalk]);
-    pool.push(['pounce', B.wYarn]);
+     * bothered with the suspense. A worn-out cat does neither. */
+    if (this._awake > 0.35) {
+      pool.push(['stalk', B.wStalk]);
+      pool.push(['pounce', B.wYarn]);
+    }
 
     var total = 0, i;
     for (i = 0; i < pool.length; i++) total += pool[i][1];
@@ -790,16 +823,17 @@
     this.petting = true;
     this._petBlock = 0;
     this.spawn('heart');
-    this.addMeter('pet');
   };
 
   Shiro.petStop = function () { this.petting = false; };
 
+  /* Purring: one heart every so often while the press is held. There is no
+   * meter behind it any more, so this is purely the flourish — which is the
+   * right shape for it, because the bar it used to fill was the thing you
+   * were looking at, and now the hearts are. */
   Shiro.petTick = function (dt) {
     if (!this.petting) return;
-    var m = CFG.METERS;
     this._petBlock = (this._petBlock || 0) + dt;
-    this.meters.mood += m.petHoldPerSecond * dt;
     if (this._petBlock > 0.45) {
       this._petBlock = 0;
       this.spawn('heart');
@@ -842,7 +876,6 @@
 
   Shiro.play = function () {
     if (this._sm.is('sleep')) this.wake();
-    this.addMeter('play');
     for (var i = 0; i < 5; i++) this.spawn('note');
     this._squashV = -18;
     this._sm.set('react', { say: 'play' });
@@ -853,21 +886,38 @@
    asleep to awake — actually looks like a cat getting up. */
   Shiro.wake = function () {
     this._squash = 0.4;
-    /* she stays up for a while whatever her energy says, so a long night
-       cannot bounce her straight back into bed */
-    this._wakeT = CFG.BEHAVIOR.wakeCooldown;
+    /* She is rested now, and the gap since she last slept starts again, so
+     * the same problem the old wakeCooldown existed to solve — a long night
+     * bouncing her straight back into bed — is gone with the meter. */
+    this._awake = 1;
+    this._sinceSleep = 0;
     this._sm.set('stretch', { fromSleep: true });
   };
 
-  /* ---------- meters ---------------------------------------------------- */
+  /* ---------- needs ------------------------------------------------------ */
 
-  Shiro.addMeter = function (kind) {
-    var d = CFG.METERS[kind];
-    if (!d) return;
-    if (d.mood) this.meters.mood += d.mood;
-    if (d.energy) this.meters.energy += d.energy;
-    if (d.hunger) this.meters.hunger += d.hunger;
-    this._saveDirty = true;
+  /* The gaps and the awake drift, ticked once a frame. This is the whole of
+   * what replaced the three meters: a running account of how long since she
+   * did each thing, and how tired she is. Nothing is read from it except
+   * rollNext() and sleep's own length. */
+  Shiro.tickNeeds = function (dt) {
+    var B = CFG.BEHAVIOR;
+    var asleep = this._sm.is('sleep');
+    this._awake = U.clamp(
+      this._awake + (asleep ? B.awake.sleepGain : -B.awake.drift) * dt,
+      B.awake.floor, 1
+    );
+    if (asleep) return;
+    this._sinceSleep += dt;
+    this._sinceFood += dt;
+    this._sinceWater += dt;
+  };
+
+  /* Eating resets the food gap. Called on arrival, not on entry, so she
+   * cannot sit the whole approach eating her imaginary dinner. */
+  Shiro.fed = function (which) {
+    if (which === 'food') this._sinceFood = 0;
+    else this._sinceWater = 0;
   };
 
   /* ---------- particles -------------------------------------------------- */
@@ -911,15 +961,8 @@
   /* ---------- per-frame update ------------------------------------------- */
 
   Shiro.update = function (dt) {
-    var m = CFG.METERS;
-
-    /* meters drift slowly */
-    this.meters.mood += m.drift.mood * dt;
-    this.meters.energy += m.drift.energy * dt;
-    this.meters.hunger += m.drift.hunger * dt;
-    this.meters.mood = U.clamp(this.meters.mood, m.clamp[0], m.clamp[1]);
-    this.meters.energy = U.clamp(this.meters.energy, m.clamp[0], m.clamp[1]);
-    this.meters.hunger = U.clamp(this.meters.hunger, m.clamp[0], m.clamp[1]);
+    /* the gaps and the awake drift — all that is left of the three meters */
+    this.tickNeeds(dt);
 
     /* target y, a light squash/stretch spring, plus a beat-synced bounce */
     var beat = (NESCAT.Audio && NESCAT.Audio.started && !NESCAT.Audio.muted)
@@ -951,11 +994,9 @@
     }
     if (this._blinkShow > 0) this._blinkShow -= dt;
 
-    if (this._wakeT > 0) this._wakeT -= dt;
-
     this.updateFlourish(dt);
 
-    /* occlusion / occlusion: dust in the room light */
+    /* dust in the room light */
     if (U.chance(dt * 0.5)) this.spawn('dust');
 
     /* throttled persistence */
@@ -986,7 +1027,12 @@
       ['tailFlick', B.wTailFlick],
       ['tailUp', B.wTailUp]
     ];
-    if (this.meters.energy < 0.45) pool.push(['yawn', B.wYawn]);
+    /* A yawn is the tell before a nap, and what precedes a nap is the clock,
+     * not a gauge. So it is offered when she is worn out, and weighted up
+     * further in the small hours, which is where a yawn actually belongs. */
+    if (this._awake < 0.6) {
+      pool.push(['yawn', NESCAT.Scene.isNight ? B.wYawn * 2 : B.wYawn]);
+    }
 
     var total = 0, i;
     for (i = 0; i < pool.length; i++) total += pool[i][1];
@@ -1386,35 +1432,30 @@
     }
   };
 
-  /* ---------- persistence ------------------------------------------------- */
+  /* ---------- persistence -------------------------------------------------
+   *
+   * The only thing worth remembering between visits is where she was standing.
+   * The meters are gone and the gaps deliberately are not saved: a gap is a
+   * running account of a session, and resuming one from three days ago would
+   * mean she walked straight to a bowl the moment the page opened, which is
+   * not how a cat arriving at a room behaves. She starts afresh, which is
+   * also one fewer reason for the piece to feel like something being kept. */
 
   Shiro.save = function () {
     this._saveT = 0;
     this._saveDirty = false;
     try {
-      root.localStorage.setItem(CFG.STORE_KEY, JSON.stringify({
-        mood: this.meters.mood,
-        energy: this.meters.energy,
-        hunger: this.meters.hunger,
-        x: this.x
-      }));
+      root.localStorage.setItem(CFG.STORE_KEY, JSON.stringify({ x: this.x }));
     } catch (e) { /* private mode / storage disabled — not fatal */ }
   };
 
   Shiro.load = function () {
-    var start = CFG.METERS.start;
-    this.meters.mood = start.mood;
-    this.meters.energy = start.energy;
-    this.meters.hunger = start.hunger;
     try {
       var raw = root.localStorage.getItem(CFG.STORE_KEY);
       if (!raw) return;
       var d = JSON.parse(raw);
-      if (d && typeof d === 'object') {
-        if (typeof d.mood === 'number') this.meters.mood = U.clamp(d.mood, 0, 1);
-        if (typeof d.energy === 'number') this.meters.energy = U.clamp(d.energy, 0, 1);
-        if (typeof d.hunger === 'number') this.meters.hunger = U.clamp(d.hunger, 0, 1);
-        if (typeof d.x === 'number') this.x = d.x;
+      if (d && typeof d === 'object' && typeof d.x === 'number') {
+        this.x = U.clamp(d.x, NESCAT.Scene.WALK_MIN_X, NESCAT.Scene.WALK_MAX_X);
       }
     } catch (e) { /* corrupt or unavailable — fall back to defaults */ }
   };

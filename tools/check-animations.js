@@ -193,6 +193,7 @@ function main() {
     return;
   }
   const { NESCAT, Scene, calls } = loadShiro();
+  const CFG = NESCAT.config;
   const Shiro = NESCAT.Shiro;
   Shiro.init();
 
@@ -214,8 +215,10 @@ function main() {
     Shiro.x = c.before ? 0 : 150;
     if (c.before) c.before(Shiro);
     if (Shiro._sm.state !== 'idle') Shiro._sm.set('idle');
-    if (c.state === 'sleep') Shiro.meters.energy = 0.3;
-    if (c.state === 'loaf') Shiro.meters.energy = 0.9;
+    /* the gaps and how awake she is — the three meters, replaced. Setting
+     * these is what the old coverage sweep did to the energy bar. */
+    if (c.state === 'sleep') Shiro._awake = 0.3;
+    if (c.state === 'loaf') Shiro._awake = 0.9;
 
     Shiro._sm.set(c.state, c.payload || {});
     const r = run(Shiro, c.secs);
@@ -285,10 +288,15 @@ function main() {
     const soakFrames = new Set();
     const steps = Math.round(soakSeconds / DT);
     for (let i = 0; i < steps; i++) {
-      /* jitter the room so gated activities keep unlocking */
+      /* Jitter the room and her clock so the gated activities keep
+       * unlocking. The gaps are pushed forward and back rather than the old
+       * meters being re-rolled, because that is what they now are: a running
+       * account, not a random number. */
       if (i % 120 === 0) { Scene.food = 1; Scene.water = 1; Scene.isNight = Math.random() < 0.3; }
-      Shiro.meters.energy = 0.25 + Math.random() * 0.7;
-      Shiro.meters.hunger = Math.random();
+      Shiro._awake = 0.3 + Math.random() * 0.7;
+      Shiro._sinceFood = Math.random() * CFG.BEHAVIOR.foodGap * 1.4;
+      Shiro._sinceWater = Math.random() * CFG.BEHAVIOR.drinkGap * 1.4;
+      Shiro._sinceSleep = Math.random() * CFG.BEHAVIOR.sinceSleepGap * 1.4;
       try {
         Shiro.update(DT);
       } catch (e) {

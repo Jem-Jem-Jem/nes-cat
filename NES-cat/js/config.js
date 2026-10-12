@@ -33,15 +33,13 @@
       sitMax: 11.0,
       reactMin: 1.5,
       reactMax: 2.4,
-      /* Sleeping is a response to tiredness, scaled by whether it is dark. These
-       * are ceilings: the actual chance is `ceiling * tiredness`, where
-       * tiredness is 0 at sleepEnergyMax and 1 at empty. A flat chance here
-       * meant a fully-rested cat rolled "sleep" and slept anyway, so at night
-       * she slept, woke stretched, and immediately went back to bed. */
-      sleepChanceNight: 0.92,  /* ceiling when dark */
-      sleepChanceDay: 0.30,    /* ceiling in daylight — a nap, not a night */
-      sleepEnergyMax: 0.70,    /* above this she is too rested to consider it */
-      wakeCooldown: 34,        /* s she stays awake after rousing, whatever her mood */
+      /* Sleeping is a function of the clock and of how long she has been up,
+       * not of a bar. `sleepChanceNight/Day` are ceilings, scaled by how worn
+       * out she is and suppressed entirely until `sinceSleepGap` has passed,
+       * so a cat who has just woken cannot immediately roll herself back into
+       * bed at three in the morning. */
+      sleepChanceNight: 0.85,  /* ceiling when dark */
+      sleepChanceDay: 0.10,    /* ceiling in daylight — a nap, not a night */
       blinkMin: 2.2,
       blinkMax: 6.5,
       blinkDur: 0.16,        /* one blink: half-closed -> shut -> half-open */
@@ -95,10 +93,34 @@
       wTree: 18,
       wYarn: 20,
       wJump: 10,
-      /* hunger climbs as she gets hungry; past this she heads for the bowl */
-      hungryBelow: 0.45,
       /* the cat tree is only worth jumping at when she is already near it */
       treeNearX: 26,
+
+      /* --- what drives her, now there are no meters ----------------------
+       *
+       * The three bars are gone. Two of them existed only to be displayed, but
+       * all three were gating behaviour, so this is not a HUD change — it is
+       * the thing that decides what she does next.
+       *
+       * What replaces them is honest about the reason. She sleeps because it
+       * is night and she has been up a while. She eats because her bowl has
+       * been going a while and the scene refills it. She is lively in the
+       * morning and slow in the small hours. All of it is derived from the
+       * clock the room already runs, so the cause is visible in the room
+       * rather than having to be read off a gauge.
+       *
+       * `awake` is the only number that looks like the old energy meter, and
+       * it is never displayed. It is not a resource she spends — it is the
+       * state the clock puts her in, and the behaviour reads it the way you
+       * would read the light coming through the window. */
+      awake: {
+        drift: 0.0075,     /* per second, while she is up */
+        sleepGain: 0.10,   /* per second, while she is asleep */
+        floor: 0.30        /* how worn out she gets before sleeping is a relief */
+      },
+      sinceSleepGap: 55,  /* s she must be up before a nap is on the cards */
+      foodGap: 75,         /* s before she looks for the food bowl */
+      drinkGap: 105,       /* s before she looks for the water bowl */
 
       /* the hunt. A pounce sends the yarn rolling across the room, and a cat
        * that has just batted something does not sit down and admire it — she
@@ -158,25 +180,6 @@
       sleepSettle: 0.9,   /* she curls down into sleep rather than snapping */
     },
 
-    /* --- meters (all 0..1) -------------------------------------------- */
-    METERS: {
-      start: { mood: 0.74, energy: 0.66, hunger: 0.22 },
-      /* per-second drift — deliberately slow ("ambient", not tamagotchi) */
-      drift: {
-        mood: -0.0013,
-        energy: -0.0007,
-        hunger: 0.0022
-      },
-      /* instant deltas from interactions */
-      pet: { mood: 0.05, energy: -0.001, hunger: 0 },
-      play: { mood: 0.07, energy: -0.055, hunger: 0.012 },
-      sleep: { mood: 0.004, energy: 0.022, hunger: 0.001 },
-      eat: { mood: 0.02, energy: 0.012, hunger: -0.30 },
-      drink: { mood: 0.012, energy: 0.010, hunger: -0.02 },
-      petHoldPerSecond: 0.055,   /* while a pet press is held */
-      clamp: [0, 1]
-    },
-
     /* --- audio --------------------------------------------------------- */
     AUDIO: {
       bpm: 84,
@@ -212,15 +215,20 @@
     NIGHT_DIM: 0.44,        /* peak ambient tint applied to the room/cat */
 
     /* --- dialogue ------------------------------------------------------- *
-     * Keyed by situation; ui.js picks and speaks them.                    */
+     * Keyed by situation; ui.js picks and speaks them. The keys are the
+     * things she can be doing or the light she is doing it in — there is no
+     * 'hungry' any more, because there is no longer a number for it to be
+     * read off, and a line about being hungry with a full bowl on screen is
+     * worse than no line. */
     DIALOGUE: {
       start: ['hi! i am shiro.', 'good to see you.', 'welcome home.'],
       pet: ['purrr~', 'that is nice.', 'more please!', 'mmm...'],
       play: ['wheee!', 'catch me!', 'again again!'],
+      nom: ['yum.', 'mmn.', 'this is the good stuff.', 'nom.'],
       sleepy: ['so sleepy...', 'nap time.', 'zzz...'],
       wake: ['mm? oh! hi.', 'i was dreaming.'],
-      hungry: ['my tummy is rumbly.', 'snack?'],
-      happy: ['i love it here.', 'best day.'],
+      night: ['it is dark.', 'stars out.', 'quiet in here.'],
+      happy: ['i love it here.', 'best day.', 'this is the spot.'],
       alert: ['what was that?', 'did you hear?', 'hm?'],
       idle: ['nice light today.', 'i like this room.', 'just sitting.']
     }

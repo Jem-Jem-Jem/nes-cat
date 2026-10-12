@@ -67,38 +67,16 @@ body {
     font-size: 8px;
 }
 
+/* The bottom-left panel. It used to hold three progress bars above the sound
+ * button; it is now just the button, so it is sized to the button rather than
+ * to a 250px column of gauges. */
 #hud .hud-bars {
     position: absolute;
     left: 10px;
     bottom: 10px;
-    width: 250px;
+    padding: 8px;
     font-size: 8px;
     pointer-events: auto;   /* the sound button must be clickable */
-}
-
-.bar-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
-}
-
-.bar-label {
-    width: 34px;
-    color: #adb5bd;
-    font-size: 7px;
-}
-
-.bar-row progress {
-    flex: 1 1 auto;
-    height: 14px;
-}
-
-.bar-val {
-    width: 34px;
-    text-align: right;
-    font-size: 7px;
-    color: #adb5bd;
 }
 
 .hud-btn {
@@ -189,12 +167,7 @@ body {
 
 @media (max-width: 720px), (max-height: 520px) {
     #hud .hud-bars {
-        width: 168px;
         padding: 6px 7px;
-    }
-    .bar-label,
-    .bar-val {
-        display: none;      /* stats collapse to small bars */
     }
     #hud .hud-top {
         font-size: 8px;

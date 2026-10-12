@@ -34,17 +34,7 @@
         dialogueText: d.getElementById('dialogue-text'),
         name: d.getElementById('cat-name'),
         clock: d.getElementById('clock'),
-        mute: d.getElementById('mute'),
-        bars: {
-          mood: d.getElementById('bar-mood'),
-          energy: d.getElementById('bar-energy'),
-          hunger: d.getElementById('bar-hunger')
-        },
-        vals: {
-          mood: d.getElementById('val-mood'),
-          energy: d.getElementById('val-energy'),
-          hunger: d.getElementById('val-hunger')
-        }
+        mute: d.getElementById('mute')
       };
 
       if (this.els.name) this.els.name.textContent = CFG.CAT_NAME;
@@ -142,42 +132,28 @@
         }
       }
 
-      /* idle chatter */
+      /* Idle chatter. This used to pick a line by reading her three meters,
+       * which meant the thing she said was a readout of hidden state rather
+       * than anything to do with the room. It is keyed to the clock and to
+       * what she is doing now instead, so a line and the picture behind it
+       * agree — she says she is sleepy in a dark room, not because a bar
+       * dropped below a number. */
       this._nextIdle -= dt;
       if (this._nextIdle <= 0) {
         this._nextIdle = U.rand(IDLE_MIN, IDLE_MAX);
-        var m = NESCAT.Shiro.meters;
-        if (m.hunger > 0.8) this.say('hungry');
-        else if (m.energy < 0.2) this.say('sleepy');
-        else if (m.mood > 0.75) this.say('happy');
+        var S = NESCAT.Shiro;
+        if (S._sm.is('sleep')) this.say('sleepy');
+        else if (NESCAT.Scene.isNight) this.say('night');
+        else if (S._sm.is('loaf') || S._sm.is('circle')) this.say('happy');
         else this.say('idle');
       }
 
-      this.updateBars();
       this.updateClock();
     },
 
     setDialogue: function (text, typing) {
       if (!this.els.dialogueText) return;
       this.els.dialogueText.textContent = text + (typing ? '▮' : '');
-    },
-
-    updateBars: function () {
-      var m = NESCAT.Shiro.meters;
-      var pairs = [['mood', m.mood], ['energy', m.energy], ['hunger', m.hunger]];
-      for (var i = 0; i < pairs.length; i++) {
-        var k = pairs[i][0], v = U.clamp(pairs[i][1], 0, 1);
-        var bar = this.els.bars[k], val = this.els.vals[k];
-        if (bar) {
-          bar.value = Math.round(v * 100);
-          /* NES.css colours the bar via these helper classes */
-          bar.classList.remove('is-success', 'is-warning', 'is-error');
-          if (k === 'mood') bar.classList.add(v > 0.5 ? 'is-success' : (v > 0.25 ? 'is-warning' : 'is-error'));
-          else if (k === 'energy') bar.classList.add(v > 0.5 ? 'is-primary' : (v > 0.25 ? 'is-warning' : 'is-error'));
-          else bar.classList.add(v < 0.6 ? 'is-success' : (v < 0.85 ? 'is-warning' : 'is-error'));
-        }
-        if (val) val.textContent = Math.round(v * 100) + '%';
-      }
     },
 
     updateClock: function () {

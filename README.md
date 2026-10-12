@@ -46,26 +46,44 @@ There are no runtime npm dependencies: `npm install` is not required, and
 
 | Gesture | What happens |
 |---|---|
-| Click / hold **Shiro** | Pet her — Mood rises, hearts pop |
-| **Drag** Shiro | Move her along the floor |
-| Click **anywhere else** in the room | Play — notes pop, Mood up, Energy down |
+| Click / hold **Shiro** | Pet her — hearts pop, she leans into it |
+| **Drag** Shiro | Pick her up and carry her; she dangles, kicks, then settles |
+| Click **anywhere else** in the room | Play — notes pop and she reacts |
 | Move the cursor | Her eyes follow it |
 | **SOUND: ON/OFF** button | Mute or unmute the chiptune |
 
 ## What's in it
 
-- **Real-time day/night cycle.** The room's light (and Shiro's behaviour) follow
-  your device clock — she naps more at night. The HUD shows the current time and
-  phase.
+An interactive animations box: one cat, in one room, doing a great many
+things, and doing them well.
+
+- **A day/night cycle on your real clock.** The light through the window is
+  derived from the sun's height, and so is she — she sleeps at night and is
+  lively in the morning. The HUD shows the time and the phase.
+- **Twenty-two states**, and both ends of every one of them are bridged
+  between the two sprite views so nothing ever hard-cuts. See
+  *Animation states* below.
+- **The hunt.** She stalks the yarn before she pounces it, and chases it
+  where it rolls. A deliberate stalk and an impulsive lunge are different
+  rolls with different weights.
+- **Settling in.** Cats trample a spot before lying down on it, so half of
+  her loaves are preceded by a circle.
 - **Generative chiptune.** No fixed melody: every step picks from a minor
-  pentatonic pool through a lowpass + delay, so it never repeats exactly. The cat
-  bounces on the beat.
-- **Mood / Energy / Hunger** meters that drift slowly, respond to how you treat
-  her, and persist across visits via `localStorage`.
-- **Dialogue box** with a typewriter effect and lines keyed to her state.
-- **Juice:** squash/stretch and anticipation, blink and tail-sway idle motion,
+  pentatonic pool through a lowpass + delay, so it never repeats exactly, and
+  she bounces on the beat.
+- **Dialogue box** with a typewriter effect, keyed to what she is doing and
+  what the light is doing.
+- **Juice:** squash/stretch, anticipation, blink and tail-sway idle motion,
   particles (hearts, `zzz`, notes, dust), and ambient room motion (curtain,
-  plant, dust motes).
+  plant, dust motes, birds, a pendulum clock on the real second).
+
+There are no meters, and there never will be again. They were simulating a
+tamagotchi loop that two of the three existed only to display — but they were
+also the only thing gating half her behaviour, so removing them was a change
+to what she *does*, not just to what is on screen. What drives her now is the
+clock the room is already running: she sleeps because it is night and she has
+been up a while, and she goes to the bowls because the gap since last time has
+passed. The reason is visible in the room rather than readable off a gauge.
 
 ## Project layout
 
@@ -74,15 +92,15 @@ NES-cat/
   index.html          markup + ordered script tags
   sketch.js           p5 orchestration: 320x180 buffer, integer scaling
   js/
-    config.js         THE tuning surface (sizes, timings, meters, day/night keys)
+    config.js         THE tuning surface (sizes, timings, day/night keys)
     palette.js        NES.css-derived palette + day/night interpolation
     frames.js         literal 32x32 pixel frames for Shiro (GENERATED)
     sprite.js         reusable sprite API: makeSprite/draw/state machine
     scene.js          the room, lighting and ambient animation
-    shiro.js          Shiro: state machine, meters, particles
+    shiro.js          Shiro: state machine, needs, particles
     input.js          one pointer path for mouse + touch
     audio.js          generative chiptune (p5.sound), guarded
-    ui.js             NES.css HUD: gate, dialogue, bars, sound
+    ui.js             NES.css HUD: gate, dialogue, clock, sound
   css/style.css       theme bridge + HUD layout
 tools/
   build-sprites.js    generates js/frames.js (all poses)
