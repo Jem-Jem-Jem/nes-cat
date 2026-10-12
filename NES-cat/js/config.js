@@ -100,6 +100,23 @@
       /* the cat tree is only worth jumping at when she is already near it */
       treeNearX: 26,
 
+      /* the hunt. A pounce sends the yarn rolling across the room, and a cat
+       * that has just batted something does not sit down and admire it — she
+       * goes after it. chase reuses the walk cycle with a shorter stride and
+       * a longer stride of ground per second, which at 32px is the difference
+       * between walking and running. */
+      chaseSpeed: 64,        /* logical px/s, well above approachSpeed */
+      chaseStride: 3.2,      /* shorter stride than a walk: paws cycle faster */
+      chaseMax: 2,           /* pounce-chase rounds before she loses interest */
+
+      /* stalk: the creep before a pounce. Deliberately slower than an
+       * approach — she is not going somewhere, she is lying in wait, and the
+       * slowness is the tell. stalkHold is how long she stays coiled at the
+       * end before she actually springs. */
+      stalkSpeed: 15,        /* logical px/s: a creep, not a walk */
+      stalkHold: 0.9,
+      wStalk: 20,
+
       /* how high she can be lifted when picked up (logical px above the
        * floor); keeps a drag from dragging her off the top of the room */
       carryLiftMax: 64,

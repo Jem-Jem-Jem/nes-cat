@@ -642,11 +642,18 @@ function frames() {
   pose('loaf_0', Object.assign({}, loafA));
   pose('loaf_1', Object.assign({}, loafA, { squash: 3.0, headDY: 3.9, pawLift: 1.9 }));
 
-  /* --- knead: working a blanket with her forepaws, head down watching.
+  /* --- shake: the full-body shudder she does the instant she is put down.
+   *
    * headDX swings the whole skull side to side — the ears and face travel
-   * with it, which is what makes it read as a shake rather than a glance. --- */
-  pose('shake_0', { eyes: 'closed', earPerk: 1.4, headDX: -1.6, headDY: 0.5, tailUp: 0.5 });
-  pose('shake_1', { eyes: 'closed', earPerk: 1.4, headDX: 1.6, headDY: 0.5, tailUp: 0.5 });
+   * with it, which is what makes it read as a shake rather than a glance.
+   *
+   * The swing has to be wide, and the ears have to change height between the
+   * two beats. At a 32px sprite a 1.6px head shift is a pixel and a half of
+   * nothing, and two frames differing by that much are the same picture. The
+   * ears flicking is what actually carries at this size, so they get 1.4px of
+   * travel of their own on top of the swing, and the torso rocks under it. */
+  pose('shake_0', { eyes: 'closed', earPerk: 1.8, headDX: -2.8, headDY: 0.6, bodyDY: 0.4, tailUp: 0.5 });
+  pose('shake_1', { eyes: 'closed', earPerk: 0.4, headDX: 2.8, headDY: 0.2, bodyDY: -0.4, tailUp: 0.5 });
   pose('shake_2', { eyes: 'happy', earPerk: 0.6, headDX: 0, headDY: -0.3, tailUp: 0.3 });
 
   /* --- alert: something caught her ear. Head up, ears forward, eyes wide.
@@ -728,6 +735,38 @@ function frames() {
     legs: { nearFront: { lift: 2 }, farFront: { lift: 2 }, nearBack: { lift: 1 }, farBack: { lift: 1 } }, tail: { lift: 2 } });
   side('jump_3', { eyes: 'open', bodyY: 1.2, squash: 1.0,
     legs: { nearFront: { lift: 1 }, farFront: { lift: 1 } }, tail: { sway: 1.2 } });
+
+  /* stalk: the low creep before a pounce.
+   *
+   * A cat does not simply decide to pounce. It drops almost flat, freezes,
+   * creeps forward with its belly near the floor, and its tail starts to
+   * lash. That is the tell — and the reason this is separate from `pounce`,
+   * which is the launch itself. Three frames: down and long, lower and longer
+   * with the tail swung out, then the rear coming up as she coils to spring.
+   *
+   * The body does the work here — a long low torso, head thrust forward past
+   * the shoulders, legs crouched almost under the chest — so profile, for the
+   * same reason as the stretch. */
+  const stalkA = {
+    eyes: 'wide', earPerk: 0.8, mouth: 'open',
+    bodyY: 2.8, bodyRX: 9.6, bodyRY: 3.0,   /* long and low, near the floor */
+    headDX: 1.6, headDY: 1.4,                /* chin forward, level with the spine */
+    legs: { farFront: { x: 18.0, lift: 2.5 }, nearFront: { x: 20.0, lift: 2.5 },
+            farBack: { x: 8.0, lift: 2.5 }, nearBack: { x: 11.0, lift: 2.5 } },
+    tail: { sway: -1.6, lift: 0.4 }
+  };
+  side('stalk_0', Object.assign({}, stalkA));
+  side('stalk_1', Object.assign({}, stalkA, {          /* longer still, tail out */
+    bodyY: 3.2, bodyRX: 10.0, bodyRY: 2.8, headDX: 2.0,
+    tail: { sway: 1.8, lift: 1.0 }
+  }));
+  side('stalk_2', Object.assign({}, stalkA, {          /* rear up, coiling */
+    eyes: 'wide', earPerk: 1.2,
+    bodyY: 2.0, bodyRX: 8.8, bodyRY: 3.6, headDX: 1.6, headDY: 0.6,
+    legs: { farFront: { x: 20.0, lift: 3.5 }, nearFront: { x: 22.0, lift: 3.5 },
+            farBack: { x: 7.5, lift: 1.5 }, nearBack: { x: 10.5, lift: 1.5 } },
+    tail: { sway: -0.4, lift: 2.2 }
+  }));
 
   /* pounce: the yarn-ball lunge — coil, spring, land */
   side('pounce_0', { eyes: 'wide', earPerk: 1, bodyY: 2.2, squash: 1.4, headDY: 1.0,

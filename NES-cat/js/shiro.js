@@ -81,7 +81,13 @@
 
     var states = {
       idle: {
-        enter: function () { self._wander = U.rand(B.wanderMin, B.wanderMax); },
+        enter: function () {
+          self._wander = U.rand(B.wanderMin, B.wanderMax);
+          /* the hunt ends when she settles. Without this the pounce/chase
+           * count would carry across the whole session and she would go
+           * straight back to chasing the next time a yarn was involved. */
+          self._hunt = 0;
+        },
         update: function (dt, s) {
           self._bob += dt * B.bobSpeed;
           if (self.petting) return;
@@ -285,7 +291,75 @@
             NESCAT.Scene.nudgeYarn(self.x + 16, 24);
             self.addMeter('play');
           }
-          if (p >= 1) self.endActivity();
+          if (p < 1) return;
+          /* she connected with it, so she goes after it — see chase */
+          if (self._act.hit && self._hunt < B.chaseMax && self.meters.energy > 0.2) {
+            self._sm.set('chase');
+            return;
+          }
+          self.endActivity();
+        }
+      },
+
+      /* stalk: the low creep before a pounce.
+       *
+       * A cat does not simply decide to pounce. It drops almost flat, freezes,
+       * creeps forward with its belly near the floor, and its tail starts to
+       * lash — and that tell is most of what makes the pounce land. Entering
+       * `pounce` straight from standing removed it, so she now stalks first
+       * and the pounce is the launch it was always meant to be.
+       *
+       * Creeping is slower than any other travel in the piece, which is the
+       * point: she is not going somewhere, she is lying in wait. */
+      stalk: {
+        enter: function (sm, from) {
+          self.beginActivity(sm, from, {
+            target: NESCAT.Scene._yarnX - 26, dur: B.stalkHold, phase: 0
+          });
+        },
+        update: function (dt, s) {
+          if (self._act.phase === 0) {
+            if (!self.arrive(dt, self._act.target, B.stalkSpeed)) return;
+            /* there: hold the coil before springing */
+            self._act.phase = 1;
+            self._sm.time = 0;
+            self.faceFixture();
+            return;
+          }
+          if (s.time > self._act.dur) self._sm.set('pounce');
+        }
+      },
+
+      /* chase: running down the yarn she has just batted away.
+       *
+       * A pounce nudges the yarn rolling, and a cat that has just swatted
+       * something does not sit down and admire it from a distance — she goes
+       * after it. This reuses the walk cycle with a shorter stride and more
+       * ground per second, which at 32px is the whole difference between
+       * walking and running: the paws cycle twice as fast and the two passing
+       * beats in the gait, where the body rides highest, come round twice as
+       * often, and that bounce is what reads as a run.
+       *
+       * The hunt is bounded. ChaseMax rounds of pounce-and-run and she loses
+       * interest, because the alternative is a cat who chases a ball of wool
+       * across the room forever. */
+      chase: {
+        enter: function (sm, from) {
+          self.beginActivity(sm, from, {
+            /* where the yarn is *going*, not where it is: nudgeYarn committed
+             * to _yarnTo when she swatted it and is rolling there now */
+            target: NESCAT.Scene._yarnTo, phase: 0
+          });
+        },
+        update: function (dt, s) {
+          if (!self.arrive(dt, self._act.target, B.chaseSpeed)) return;
+          /* there: one more go at it, or lose interest and go back to the room */
+          self._hunt = (self._hunt || 0) + 1;
+          if (self._hunt < B.chaseMax && self.meters.energy > 0.2) {
+            self._sm.set('pounce', {});
+            return;
+          }
+          self.endActivity();
         }
       },
 
@@ -468,7 +542,18 @@
    * Coming back uses sm.resume() rather than sm.set(), because enter() rebuilds
    * _act — the target and the arrived flag — and re-running it would send her
    * back to the start of the approach, so she would pivot forever. */
-  Shiro.arrive = function (dt, targetX) {
+  /* Walk toward a fixture until she is close enough to act on it. Returns
+   * true once arrived (and latches, so the caller can then run its
+   * performance phase without re-walking every frame).
+   *
+   * `speed` defaults to approachSpeed; chase passes a faster one, because the
+   * difference between ambling to a bowl and running down a rolling ball of
+   * wool is speed, not a different animation.
+   *
+   * Approaching a bowl means crossing the room in profile, so if she is still
+   * front-on she pivots first — see beginActivity, which does that on the way
+   * in, before this is ever asked. */
+  Shiro.arrive = function (dt, targetX, speed) {
     var act = this._act;
     if (act.arrived) return true;
     /* no fixture to walk to: she is already where she needs to be */
@@ -480,7 +565,7 @@
       return true;
     }
     this.facing = dx < 0 ? -1 : 1;
-    this.x += Math.sign(dx) * CFG.BEHAVIOR.approachSpeed * dt;
+    this.x += Math.sign(dx) * (speed || CFG.BEHAVIOR.approachSpeed) * dt;
     this._bob += dt * 11;
     return false;
   };
@@ -506,6 +591,10 @@
   Shiro.beginActivity = function (sm, from, act) {
     act.from = from;
     this._act = act;
+    /* Stepping is measured from where the approach began, not from wherever
+     * the last walk left it — otherwise an activity entered mid-stride starts
+     * its frame count from a stale origin and the first stride skips. */
+    if (act.target != null) this._walkStartX = this.x;
     if (Shiro.isSideState(from)) return act;
     sm.set('turn', {
       to: 'side',
@@ -617,32 +706,28 @@
     if (Sc.water > 0.05) pool.push(['drink', 18]);
     if (Math.abs(this.x - Sc.CAT_TREE_X) < B.treeNearX) pool.push(['tree', B.wTree]);
     else pool.push(['jump', B.wJump]);
+    /* the yarn gets two entries: a deliberate stalk-and-pounce, and the
+     * impulsive lunge she does when she is already close and cannot be
+     * bothered with the suspense */
+    pool.push(['stalk', B.wStalk]);
     pool.push(['pounce', B.wYarn]);
 
     var total = 0, i;
     for (i = 0; i < pool.length; i++) total += pool[i][1];
     var pick = Math.random() * total;
-    var kind = 'sit';
+    var kind = pool[0][0];
     for (i = 0; i < pool.length; i++) {
       pick -= pool[i][1];
       if (pick <= 0) { kind = pool[i][0]; break; }
     }
 
-    if (kind === 'sit') { this._sm.set('sit'); return; }
-    if (kind === 'pounce') { this._sm.set('pounce'); return; }
-    if (kind === 'watch') { this._sm.set('watch'); return; }
-    if (kind === 'stretch') { this._sm.set('stretch'); return; }
-    if (kind === 'loaf') { this._sm.set('loaf'); return; }
-    if (kind === 'knead') { this._sm.set('knead'); return; }
-    if (kind === 'alert') { this._sm.set('alert'); return; }
-
-    /* stays put: point her at the fixture and let the state walk her over */
-    if (kind === 'eat') this._sm.set('eat', { from: null });
-    else if (kind === 'drink') this._sm.set('drink', { from: null });
-    else if (kind === 'groom') this._sm.set('groom', { from: null });
-    else if (kind === 'wash') this._sm.set('wash', { from: null });
-    else if (kind === 'tree') this._sm.set('tree', { from: null });
-    else if (kind === 'jump') this._sm.set('jump', { from: null });
+    /* Entering is just sm.set(name) for every state in the pool. The
+     * activities read their own fixture and their own direction of travel out
+     * of Scene when they are entered, so there is nothing to pass in — and
+     * the `from: null` payload this used to carry was read by nothing at all.
+     * The guard is for a pool entry naming a state the machine does not have,
+     * which should be impossible but must not throw inside a wander roll. */
+    if (this._sm.states[kind]) this._sm.set(kind);
   };
 
   /* ---------- interactions --------------------------------------------- */
@@ -943,7 +1028,7 @@
   Shiro.SIDE_STATES = {
     walk: 1, jump: 1, pounce: 1,
     eat: 1, drink: 1, groom: 1, wash: 1, tree: 1,
-    turn: 1, watch: 1, stretch: 1, knead: 1
+    turn: 1, watch: 1, stretch: 1, knead: 1, chase: 1, stalk: 1
   };
 
   /* Two different questions about the view, and they are not interchangeable:
@@ -1053,8 +1138,16 @@
    * disagree — which is always, because she accelerates, turns and stops.
    * One frame per fixed distance travelled means the stride stays under
    * her however fast she is going. */
-    if (st === 'walk') {
-      var stride = Bh.walkStride || 5;
+    /* One frame per fixed distance travelled means the stride stays under her
+     * however fast she is going.
+     *
+     * chase shares the cycle on a shorter stride, and that is the whole trick:
+     * a run at this size is not a different set of frames, it is the same
+     * stride played faster — the paws cycle about 1.6x as often, and the two
+     * passing beats in the gait (where the body rides highest) come round that
+     * much faster too. The bounce is what reads as a run. */
+    if (st === 'walk' || st === 'chase') {
+      var stride = st === 'chase' ? (Bh.chaseStride || 3) : (Bh.walkStride || 5);
       var step = Math.floor(Math.abs(this.x - (this._walkStartX || this.x)) / stride);
       return 'side_walk_' + (step % 6);
     }
@@ -1064,6 +1157,15 @@
       if (t < Bh.jumpDur * 0.5) return 'side_jump_1';
       if (t < Bh.jumpDur * 0.78) return 'side_jump_2';
       return 'side_jump_3';
+    }
+    if (st === 'stalk') {
+      /* creeping: the two long low frames, alternating as she inches in */
+      if (self._act.phase === 0) {
+        return (Math.sin(t * 2.4) > 0) ? 'side_stalk_0' : 'side_stalk_1';
+      }
+      /* arrived and coiled — held, because the pause before the spring is
+       * the whole tell */
+      return 'side_stalk_2';
     }
     if (st === 'pounce') {
       if (t < Bh.pounceDur * 0.3) return 'side_pounce_0';

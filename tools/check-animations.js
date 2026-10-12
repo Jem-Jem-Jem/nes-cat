@@ -115,7 +115,7 @@ function run(Shiro, seconds, opts) {
 const CASES = [
   { state: 'idle', secs: 8 },
   { state: 'sit', secs: 8 },
-  { state: 'sleep', secs: 6 },
+  { state: 'sleep', secs: 6, night: true },
   { state: 'stretch', secs: 3 },
   { state: 'loaf', secs: 7 },
   { state: 'shake', secs: 1.2 },
@@ -131,8 +131,8 @@ const CASES = [
   { state: 'wash', secs: 4 },
   { state: 'tree', secs: 9, before: s => { s.x = 240; } },
   { state: 'watch', secs: 6 },
-  { state: 'chase', secs: 6 },
-  { state: 'stalk', secs: 5 },
+  { state: 'chase', secs: 6, before: s => { s.x = 200; } },
+  { state: 'stalk', secs: 9, before: s => { s.x = 150; } },
   { state: 'circle', secs: 7 },
   { state: 'ruffle', secs: 2.5 }
 ];
@@ -202,8 +202,13 @@ function main() {
   /* ---- 1. every state, entered cold ---- */
   for (const c of CASES) {
     if (!Shiro._sm.states[c.state]) continue;         /* not implemented yet */
-    /* reset to a known place and state */
+    /* reset to a known place, state and clock */
     Scene._yarnX = 104; Scene.food = 1; Scene.water = 1;
+    /* sleeping rolls a chance to wake itself in daylight, so a case that
+     * wants to watch her actually sleep has to say so — otherwise sleep_0
+     * and sleep_1 come and go depending on the dice and the coverage
+     * sweep reports them as orphans. */
+    Scene.isNight = !!c.night;
     calls.length = 0;
     Shiro._sm.set('idle');
     Shiro.x = c.before ? 0 : 150;
@@ -320,6 +325,7 @@ function main() {
   const used = new Set();
   for (const c of CASES) {
     if (!Shiro._sm.states[c.state]) continue;
+    Scene.isNight = !!c.night;
     Shiro._sm.set('idle'); Shiro.x = 150;
     Shiro._sm.set(c.state, c.payload || {});
     const r = run(Shiro, c.secs);
