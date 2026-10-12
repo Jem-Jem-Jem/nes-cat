@@ -15,6 +15,8 @@
   "scripts": {
     "start": "npx --yes http-server . -p 8080 -c-1",
     "sprites:check": "node tools/build-sprites.js --check",
+    "anim:check": "node tools/check-animations.js",
+    "anim:soak": "node tools/check-animations.js --soak 600",
     "sprites:preview": "node tools/build-sprites.js --preview",
     "sprites:build": "node tools/build-sprites.js --build"
   }
