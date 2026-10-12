@@ -1116,7 +1116,23 @@
     this._carryT = 0;
     this._lift = 0;
     if (this._sm.is('sleep')) this.wake();
-    this._sm.set('react', { say: null });
+    /* There used to be a `this._sm.set('react', { say: null })` here, so that
+     * being picked up had a reaction to go with it. It could never be seen, for
+     * three reasons stacked on top of each other: this line only runs once
+     * `dragging` is already true; update() does not tick the machine while she
+     * is being dragged, so react's clock never advanced and its update never
+     * ran; and poseFor() tests `dragging` before it looks at any state's
+     * frames, so the whole drag drew from the held cycle instead. dragEnd()
+     * goes to shake, which is the next state she is ever in.
+     *
+     * Nothing was lost. The first frame of the held cycle, side_held_lift, is
+     * already the "her paws leave the floor" beat the react was put there for.
+     * The other three callers of react — bump, shake and play — are all reached
+     * while she is on the ground, and all three still work.
+     *
+     * So this stays a comment rather than being quietly reinstated: a state
+     * change that provably cannot be drawn is not a reaction, it is a lie the
+     * next reader has to disprove again from scratch. */
   };
 
   Shiro.dragTo = function (x, y) {
