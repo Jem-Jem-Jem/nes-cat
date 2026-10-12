@@ -46,7 +46,6 @@
       blinkMin: 2.2,
       blinkMax: 6.5,
       blinkDur: 0.16,        /* one blink: half-closed -> shut -> half-open */
-      gazeRange: 46,         /* logical px of cursor offset that maxes the glance */
       bobSpeed: 7.0,          /* head bob for the breathe animation */
 
       /* idle flourishes — the small self-started animations that keep her
@@ -189,6 +188,17 @@
       wAlert: 12,
       wKnead: 15,
       sleepSettle: 0.9,   /* she curls down into sleep rather than snapping */
+    },
+
+    /* --- input ----------------------------------------------------------- *
+     * The two thresholds that decide what a press means. These lived as
+     * constants at the top of input.js, which made them the two numbers in
+     * the whole piece that config.js did not actually own — and config.js
+     * claiming to be the tuning surface while the drag threshold was not in
+     * it is how that claim stops being true. */
+    INPUT: {
+      dragThreshold: 6,     /* logical px a press must travel to become a drag */
+      gazeDeadzone: 6       /* logical px of cursor offset before she glances */
     },
 
     /* --- audio --------------------------------------------------------- */

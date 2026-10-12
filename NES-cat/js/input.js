@@ -17,8 +17,13 @@
   var NESCAT = (root.NESCAT = root.NESCAT || {});
   var U = NESCAT.util;
 
-  var DRAG_THRESHOLD = 6;    /* logical px before a press becomes a drag */
-  var GAZE_DEADZONE = 6;     /* logical px before the eyes glance */
+  /* The two thresholds that decide what a press means. These are in config
+   * rather than here: they are the difference between "a click on her" and
+   * "you have picked her up", which is a feel value, and a feel value that
+   * lives in a file called `input.js` cannot be tuned from the place the
+   * README tells you to tune from. */
+  var DRAG_THRESHOLD = NESCAT.config.INPUT.dragThreshold;
+  var GAZE_DEADZONE = NESCAT.config.INPUT.gazeDeadzone;
 
   var Input = {
     x: 0,

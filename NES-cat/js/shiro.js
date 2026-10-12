@@ -54,7 +54,6 @@
     _napFor: 0,            /* s she intends to sleep for once she decides */
 
     _blink: 0,
-    _blinkNext: 3,
     /* the frame currently on screen. Seeded because a transition can ask for it
      * before anything has been drawn. See frameFor(). */
     _shown: 'idle_open',
@@ -452,29 +451,36 @@
       /* watch: she turns her body to look at something and stands there,
        * without walking over to it. This is the turn as an activity in its
        * own right, and the reason the profile view earns its keep on a cat
-       * who is not moving. */
+       * who is not moving.
+       *
+       * It used to hand-build its own turn twice over — setting _turn by hand
+       * and then re-drawing the bridge in frameFor rather than handing over to
+       * the turn state — so the sequence existed in two places and the copy
+       * was the one that could drift. It is now turn -> watchHold -> turn,
+       * which is the same choreography with one implementation of a turn. */
       watch: {
-        enter: function () {
-          self._act = { dur: B.watchDur, phase: 'out' };
-          self._turn = { to: 'side', from: 'idle_open', dur: B.turnDur, then: 'watch' };
-          self.facing = U.chance(0.5) ? 1 : -1;
+        enter: function (sm, from) {
+          /* which way she turns to look is arbitrary and should look it */
+          self._watchDir = U.chance(0.5) ? 1 : -1;
+          sm.set('turn', {
+            to: 'side', from: self._shown || 'idle_open',
+            facing: self._watchDir, then: 'watchHold'
+          });
         },
+        update: function (dt, s) { /* the turn has already taken over */ }
+      },
+
+      /* the pause in the middle of watching something: profile, standing
+       * still, breathing, and then turning back to face the room */
+      watchHold: {
+        enter: function () {},
         update: function (dt, s) {
-          if (self._act.phase === 'out') {
-            if (s.time < B.turnDur) return;
-            self._act.phase = 'hold';
-            self._sm.time = 0;
-            return;
-          }
-          if (self._act.phase === 'hold') {
-            if (s.time > self._act.dur) {
-              self._act.phase = 'back';
-              self._sm.time = 0;
-              self._turn = { to: 'front', from: 'side_stand_0', dur: B.turnDur, then: 'idle' };
-            }
-            return;
-          }
-          if (s.time >= B.turnDur) sm.set('idle');
+          self._bob += dt * 2.2;
+          if (s.time <= B.watchDur) return;
+          sm.set('turn', {
+            to: 'front', from: self._shown || 'side_stand_0',
+            facing: self._watchDir, then: 'idle'
+          });
         }
       },
 
@@ -1219,8 +1225,8 @@
   Shiro.SIDE_STATES = {
     walk: 1, jump: 1, pounce: 1,
     eat: 1, drink: 1, groom: 1, wash: 1, tree: 1,
-    turn: 1, watch: 1, stretch: 1, knead: 1, chase: 1, stalk: 1, circle: 1,
-    scratch: 1
+    turn: 1, watch: 1, watchHold: 1, stretch: 1, knead: 1, chase: 1,
+    stalk: 1, circle: 1, scratch: 1
   };
 
   /* Two different questions about the view, and they are not interchangeable:
@@ -1305,33 +1311,17 @@
       if (tp < 0.72) return mid[0];
       return mid[1];
     }
-    if (st === 'watch') {
-      /* out: same progression as a turn — front pose, both bridge frames,
-         then the profile hold. Holding the starting pose briefly is what
-         makes it read as a pivot rather than a cut. */
-      if (self._act.phase === 'out') {
-        var op = U.clamp(t / Bh.turnDur, 0, 1);
-        if (op < 0.4) return self.pickFrame('idle_open', 'side_turn_1');
-        if (op < 0.72) return 'side_turn_1';
-        return 'side_turn_2';
-      }
-      if (self._act.phase === 'hold') {
-        return (Math.sin(t * 2.4) > 0) ? 'side_stand_0' : 'side_stand_1';
-      }
-      /* back: the same bridge, reversed */
-      var bp = U.clamp(t / Bh.turnDur, 0, 1);
-      if (bp < 0.4) return 'side_turn_2';
-      if (bp < 0.72) return 'side_turn_1';
-      return 'idle_open';
+    /* The pause in the middle of watching: profile, standing still, breathing.
+     * The two turns either side of it are the turn state's problem. */
+    if (st === 'watchHold') {
+      return (Math.sin(t * 2.4) > 0) ? 'side_stand_0' : 'side_stand_1';
     }
 
     /* Stepping is driven by distance travelled, not by elapsed time. Cycling
-   * on a clock means the paws slide whenever her speed and the frame rate
-   * disagree — which is always, because she accelerates, turns and stops.
-   * One frame per fixed distance travelled means the stride stays under
-   * her however fast she is going. */
-    /* One frame per fixed distance travelled means the stride stays under her
-     * however fast she is going.
+     * on a clock means the paws slide whenever her speed and the frame rate
+     * disagree — which is always, because she accelerates, turns and stops.
+     * One frame per fixed distance travelled means the stride stays under
+     * her however fast she is going.
      *
      * chase shares the cycle on a shorter stride, and that is the whole trick:
      * a run at this size is not a different set of frames, it is the same
