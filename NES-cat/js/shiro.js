@@ -627,9 +627,11 @@
           if (self.onSay && U.chance(0.6)) self.onSay('sleepy');
         },
         update: function (dt, s) {
+          /* a hand arriving gets the headbutt, not a wake-up stretch: she has
+           * not slept yet, so there is nothing to wake up from */
+          if (self.petting) { self._sm.set('bump', { say: 'pet' }); return; }
           if (s.time > self._act.dur) { self._sm.set('sleep'); return; }
           self._bob += dt * B.bobSpeed * 0.5;
-          if (self.petting) { self.wake(); return; }
         }
       },
 
@@ -845,7 +847,20 @@
     if (this._sinceSleep < B.sinceSleepGap) sleepChance = 0;
 
     var r = Math.random();
-    if (r < sleepChance) { this._sm.set('sleep'); return; }
+    if (r < sleepChance) {
+      /* She does not simply lie down. She sits up and loses the argument
+       * first, and the losing is the bit you can see — so most of the time
+       * going to sleep goes via `nod`, which is what hands over to it. A
+       * direct trip to bed skips the best part of going to bed.
+       *
+       * `nod` used to be an entry in the pool below instead, which sounds
+       * equivalent and is not: at night the sleep branch above fires long
+       * before a tired cat ever gets as far as the pool, so the nod she was
+       * built for was only ever reachable in the middle of the day. */
+      if (this._awake < 0.8 && U.chance(0.6)) { this._sm.set('nod'); return; }
+      this._sm.set('sleep');
+      return;
+    }
     if (r < sleepChance + 0.35) {
       /* `this`, not `self`: rollNext is defined at module level, so the
          `self` captured inside buildStateMachine is not in scope here — in a
@@ -890,10 +905,6 @@
       else pool.push(['loaf', B.wLoaf]);
     }
     pool.push(['knead', B.wKnead]);
-    /* Sitting up and nodding off. Offered only once she is actually losing
-     * the fight, so it reads as the run-up to a nap rather than as a pose
-     * she happens to strike. */
-    if (this._awake < 0.55) pool.push(['nod', B.wNod]);
     /* Something caught her ear. A cat that has just woken is not interested
      * in what it heard, and neither is one that has been up all night, so
      * this is offered by how awake she is rather than by a flat weight. */

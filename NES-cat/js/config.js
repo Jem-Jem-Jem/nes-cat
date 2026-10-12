@@ -190,11 +190,12 @@
       alertDur: 1.15,
       kneadDur: 4.2,
       /* nod: sitting up and losing a fight with sleep. The droop-and-recover
-       * beats, and how many of them she gets through before the last one
-       * does not come back up. */
+       * beats, and how long she sits there before the last one does not come
+       * back up. She reaches it from the tiredness roll rather than from the
+       * activity pool — see rollNext — so it is not a weight to tune but a
+       * length. */
       nodBeat: 0.85,
       nodDur: 4.6,
-      wNod: 16,
       wAlert: 12,
       wKnead: 15,
       sleepSettle: 0.9,   /* she curls down into sleep rather than snapping */
