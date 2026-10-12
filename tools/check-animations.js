@@ -133,7 +133,7 @@ const CASES = [
   { state: 'watch', secs: 6 },
   { state: 'chase', secs: 6, before: s => { s.x = 200; } },
   { state: 'stalk', secs: 9, before: s => { s.x = 150; } },
-  { state: 'circle', secs: 7 },
+  { state: 'circle', secs: 7, payload: { then: 'loaf' } },
   { state: 'ruffle', secs: 2.5 }
 ];
 

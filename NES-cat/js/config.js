@@ -117,6 +117,17 @@
       stalkHold: 0.9,
       wStalk: 20,
 
+      /* circle: trampling a spot before lying down on it. Cats do this almost
+       * every time, and it is the reason a cat settles somewhere new rather
+       * than just deciding to. Purely a code animation — she turns on the
+       * spot in profile, so the arc is foreshortened to a small horizontal
+       * swing with the facing flipping at each extreme, and the walk cycle
+       * keeps stepping underneath it. */
+      circleDur: 2.6,
+      circleRadius: 13,     /* logical px of swing either side of the spot */
+      circleTurns: 1.5,     /* rotations over circleDur */
+      circleChance: 0.55,   /* of settling into a loaf, circle first */
+
       /* how high she can be lifted when picked up (logical px above the
        * floor); keeps a drag from dragging her off the top of the room */
       carryLiftMax: 64,

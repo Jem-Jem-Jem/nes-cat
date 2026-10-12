@@ -427,6 +427,52 @@
         }
       },
 
+      /* circle: trampling a spot before lying down on it.
+       *
+       * Cats do this almost every time they settle somewhere new, and it is
+       * most of why a cat chooses a spot rather than just arriving at one.
+       *
+       * Entirely a code animation — no new art, and that is the point. She is
+       * in profile, so a circle in the floor plane is foreshortened to a
+       * small horizontal swing; what sells the turn is the profile sprite
+       * flipping as she passes through the two points where she is heading
+       * toward or away from the viewer, over the walk cycle keeping its
+       * cadence underneath. Stepping is on a clock here rather than on
+       * distance, which is the one place that is correct: she is not
+       * translating across the room, she is rotating on the spot, so there is
+       * no distance for the paws to be stepped by. */
+      circle: {
+        enter: function (sm, from, payload) {
+          var p = payload || {};
+          self.beginActivity(sm, from, { target: null, dur: B.circleDur, phase: 0 });
+          self._circle = {
+            x0: self.x,
+            r: B.circleRadius,
+            /* which way she starts turning is arbitrary and should look it */
+            spin: U.chance(0.5) ? 1 : -1,
+            /* she is settling somewhere, not just wandering round */
+            then: p.then || 'idle'
+          };
+        },
+        update: function (dt, s) {
+          if (!self.arrive(dt, self._act.target)) return;
+          var c = self._circle;
+          var p = s.time / self._act.dur;
+          var a = p * Math.PI * 2 * B.circleTurns * c.spin;
+          self.x = U.clamp(c.x0 + Math.sin(a) * c.r,
+                           NESCAT.Scene.WALK_MIN_X, NESCAT.Scene.WALK_MAX_X);
+          /* at the ends of the swing she is broadside to the viewer; between
+           * them she is heading away from or toward them, which is exactly
+           * when the profile sprite should show the other side of her */
+          self.facing = Math.cos(a) > 0 ? 1 : -1;
+          self._bob += dt * 9;
+          if (p >= 1) {
+            self.x = c.x0;
+            self.endActivity(c.then);
+          }
+        }
+      },
+
       /* ---------- idle variety ------------------------------------------
        * Flourishes are overlays on one pose. These are whole different
        * postures she settles into while awake and still, which is what
@@ -698,7 +744,14 @@
     pool.push(['watch', B.wWatch]);
     /* idle postures: a stretch and a loaf are different from sitting */
     pool.push(['stretch', B.wStretch]);
-    if (this.meters.energy > 0.45) pool.push(['loaf', B.wLoaf]);
+    if (this.meters.energy > 0.45) {
+      /* A cat tramples a spot before lying down on it, and the loaf is where
+       * she is going to be lying down. So a loaf is sometimes preceded by a
+       * circle — the settle-in is the part that makes the loaf read as
+       * having been chosen rather than arrived at. */
+      if (U.chance(B.circleChance)) pool.push(['circle', B.wLoaf]);
+      else pool.push(['loaf', B.wLoaf]);
+    }
     pool.push(['knead', B.wKnead]);
     /* something caught her ear — more likely when she is wide awake */
     if (this.meters.energy > 0.6) pool.push(['alert', B.wAlert]);
@@ -727,7 +780,7 @@
      * the `from: null` payload this used to carry was read by nothing at all.
      * The guard is for a pool entry naming a state the machine does not have,
      * which should be impossible but must not throw inside a wander roll. */
-    if (this._sm.states[kind]) this._sm.set(kind);
+    if (this._sm.states[kind]) this._sm.set(kind, kind === 'circle' ? { then: 'loaf' } : {});
   };
 
   /* ---------- interactions --------------------------------------------- */
@@ -1028,7 +1081,7 @@
   Shiro.SIDE_STATES = {
     walk: 1, jump: 1, pounce: 1,
     eat: 1, drink: 1, groom: 1, wash: 1, tree: 1,
-    turn: 1, watch: 1, stretch: 1, knead: 1, chase: 1, stalk: 1
+    turn: 1, watch: 1, stretch: 1, knead: 1, chase: 1, stalk: 1, circle: 1
   };
 
   /* Two different questions about the view, and they are not interchangeable:
@@ -1157,6 +1210,12 @@
       if (t < Bh.jumpDur * 0.5) return 'side_jump_1';
       if (t < Bh.jumpDur * 0.78) return 'side_jump_2';
       return 'side_jump_3';
+    }
+    if (st === 'circle') {
+      /* clock-stepped, unlike the walk: she is turning on the spot rather
+       * than travelling, so there is no ground for the paws to be stepped by
+       * and a distance-driven cycle would stall at the ends of every swing */
+      return 'side_walk_' + (Math.floor(t * 9) % 6);
     }
     if (st === 'stalk') {
       /* creeping: the two long low frames, alternating as she inches in */
