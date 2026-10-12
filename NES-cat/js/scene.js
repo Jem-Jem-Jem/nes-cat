@@ -89,7 +89,11 @@
      * the bowl instead of into it — which is what an 18px stand-off did,
      * leaving her head ten pixels beyond the food with nothing under it. */
     BOWL_GAP: 27,
-    CAT_TREE_X: 214,     /* she stands just left of the post */
+    CAT_TREE_X: 213,     /* the rope post: she stands just left of it */
+    /* How far left of the post she stands to scratch it. Her forepaws reach
+     * about 25px into a 32px sprite, so anything less puts her raking the air
+     * beside the post rather than on it. */
+    TREE_GAP: 28,
     YARN_MIN_X: 92,
     YARN_MAX_X: 138,
 
@@ -322,11 +326,20 @@
       fillC(g, U.mixHex(L.wall, '#000000', 0.26));
       g.rect(0, 6, W, 3);
 
-      /* baseboard */
-      fillC(g, U.mixHex(L.wall, '#ffffff', 0.09));
-      g.rect(0, 109, W, 1);
-      fillC(g, U.mixHex(L.wall, '#000000', 0.32));
-      g.rect(0, 110, W, 5);
+      /* baseboard: a proper profile rather than two flat bands — a cap, a
+       * face, the groove a skirting board has, and a soft cast shadow along
+       * the boards. It used to stop two pixels short of the floor, and that
+       * strip of bare wall above the seam is exactly what makes a room read
+       * as a backdrop rather than as a room. */
+      var bb = 106;                    /* top of the board */
+      fillC(g, U.mixHex(L.wall, '#ffffff', 0.10));
+      g.rect(0, bb, W, 1);
+      fillC(g, U.mixHex(L.wall, '#000000', 0.30));
+      g.rect(0, bb + 1, W, this.FLOOR_TOP - bb - 2);
+      fillC(g, U.mixHex(L.wall, '#000000', 0.40));
+      g.rect(0, bb + 5, W, 1);
+      fillC(g, U.mixHex(L.floor, '#000000', 0.16));
+      g.rect(0, this.FLOOR_TOP, W, 2);
 
       /* seam between wall and floor */
       fillC(g, '#0f0f18');
@@ -726,19 +739,26 @@
 
     /* The patch of daylight the window throws onto the boards. Its angle
      * tracks the real clock, so morning light lands left and evening light
-     * lands right. Drawn before the rug, which sits on top of it. */
+     * lands right. Drawn before the rug, which sits on top of it.
+     *
+     * Scanline rects, not a polygon. p5 antialiases a shape, and this buffer
+     * is blitted with smoothing off, so a slanted quad came out with soft
+     * grey edges that matched nothing else in the room — the one thing in
+     * here drawn in a different style. One rect per row keeps it crisp and
+     * costs nothing at 64 rows. */
     drawBeam: function (g, L) {
       if (this.isNight) return;
       var sunT = U.clamp((this.hour - 6) / 12, 0, 1);
       var shift = Math.round((sunT - 0.5) * 52);
       var beam = U.mixHex(L.floor, L.window, 0.14 + 0.26 * L.glow);
       g.fill(g.color(beam));
-      g.beginShape();
-      g.vertex(36, this.FLOOR_TOP + 1);
-      g.vertex(94, this.FLOOR_TOP + 1);
-      g.vertex(126 + shift, H);
-      g.vertex(6 + shift, H);
-      g.endShape(g.CLOSE);
+      var top = this.FLOOR_TOP + 1;
+      for (var y = top; y < H; y++) {
+        var t = (y - top) / (H - top);
+        var x0 = U.lerp(36, 6 + shift, t);
+        var x1 = U.lerp(94, 126 + shift, t);
+        g.rect(Math.round(x0), y, Math.round(x1 - x0), 1);
+      }
     },
 
     /* The pendant lamp's warm pool, only after dark. Alpha, so it washes
@@ -753,20 +773,58 @@
       }
     },
 
+    /* The rug she spends most of her life on, so it is worth more than four
+     * concentric ellipses. A kilim: a dark ground, two bands, a stepped
+     * medallion in the middle, a border of diamonds and a woven fringe at each
+     * end. All discs and rects, so it stays as crisp as the rest of the room.
+     *
+     * An earlier pass scattered pale dashes over the surface to suggest pile.
+     * At this scale they did not read as texture, they read as dirt on the
+     * carpet, and nothing else in the room is speckled, so they are gone. */
     drawRug: function (g, L) {
       var cx = 160, cy = 150;
-      disc(g, cx, cy, 76, 16, g.color(U.mixHex(L.floor, '#000000', 0.32)));
-      disc(g, cx, cy, 72, 14, g.color(U.mixHex(L.floor, C.error, 0.34)));
-      disc(g, cx, cy, 56, 10, g.color(U.mixHex(L.floor, C.warning, 0.22)));
-      disc(g, cx, cy, 40, 6, g.color(U.mixHex(L.floor, C.error, 0.20)));
+      var dark = U.mixHex(L.floor, '#000000', 0.34);
+      var red = U.mixHex(L.floor, C.error, 0.34);
+      var gold = U.mixHex(L.floor, C.warning, 0.22);
+      var cream = U.mixHex(L.floor, '#ffffff', 0.20);
 
-      /* a ring of woven dashes */
-      fillC(g, U.mixHex(L.floor, '#ffffff', 0.16));
-      for (var a = 0; a < 28; a++) {
-        var ang = (a / 28) * Math.PI * 2;
-        g.rect(Math.round(cx + Math.cos(ang) * 64),
-               Math.round(cy + Math.sin(ang) * 12), 2, 2);
+      /* fringe first, so the body of the rug overlaps its roots */
+      fillC(g, cream);
+      for (var f = -6; f <= 6; f++) {
+        var fx = cx + f * 12;
+        g.rect(fx, cy - 18, 1, 3);
+        g.rect(fx, cy + 15, 1, 3);
       }
+
+      disc(g, cx, cy, 78, 17, g.color(dark));          /* the dark ground */
+      disc(g, cx, cy, 74, 15, g.color(red));           /* outer band */
+      disc(g, cx, cy, 58, 11, g.color(gold));          /* middle band */
+      disc(g, cx, cy, 42, 7, g.color(red));            /* inner field */
+
+      /* A border of stepped diamonds on the red band. Three pixels across
+       * reads as a motif; one reads as a speck, which is what the first
+       * version was. */
+      fillC(g, dark);
+      for (var d = 0; d < 12; d++) {
+        var a = (d / 12) * Math.PI * 2;
+        var dx = Math.round(cx + Math.cos(a) * 66);
+        var dy = Math.round(cy + Math.sin(a) * 13.5);
+        g.rect(dx - 1, dy - 1, 3, 1);
+        g.rect(dx - 1, dy, 3, 1);
+        g.rect(dx, dy - 1, 1, 3);
+      }
+
+      /* the medallion: a stepped lozenge, three rings, centred on her */
+      fillC(g, gold);
+      g.rect(cx - 14, cy - 1, 29, 3);
+      g.rect(cx - 1, cy - 3, 3, 7);
+      fillC(g, dark);
+      g.rect(cx - 9, cy - 1, 19, 3);
+      g.rect(cx - 1, cy - 2, 3, 5);
+      fillC(g, gold);
+      g.rect(cx - 4, cy - 1, 9, 3);
+      fillC(g, dark);
+      g.rect(cx, cy, 1, 1);
     },
 
     drawBowls: function (g, L) {
@@ -802,6 +860,14 @@
 
     /* ---------- cat tree ---------------------------------------------------- */
 
+    /* The cat tree: a plinth, a rope-wrapped post, two perches and a bed.
+     *
+     * It is the tallest thing in the room and the thing she reaches for, so it
+     * gets a real profile rather than a stick and two shelves. Two things took
+     * a second pass to get right: the plinth has to be drawn *after* the post
+     * or the post draws over it and the base reads as a shadow behind a
+     * stick; and the rope has to be wound tight enough to read as wrap rather
+     * than as the rungs of a ladder. */
     drawCatTree: function (g, L) {
       var t = this.time;
       var woodD = amb(L, '#4a3018');
@@ -809,40 +875,68 @@
       var rope = amb(L, '#c9a86b');
       var ropeD = amb(L, '#a3854f');
 
-      /* base + its shadow on the boards */
-      fillC(g, U.mixHex(L.floor, '#000000', 0.32));
-      g.rect(198, 142, 34, 2);
-      fillC(g, woodD); g.rect(196, 136, 38, 6);
-      fillC(g, woodL); g.rect(196, 136, 38, 1);
+      /* shadow on the boards, cast away from the window */
+      fillC(g, U.mixHex(L.floor, '#000000', 0.30));
+      g.rect(197, 141, 42, 2);
+      g.rect(202, 143, 34, 1);
 
-      /* lower post, wrapped in rope */
-      fillC(g, rope); g.rect(210, 84, 6, 52);
-      fillC(g, ropeD);
-      for (var y = 84; y < 136; y += 3) g.rect(210, y, 6, 1);
+      /* the post, wrapped in rope. Wound on the diagonal, a turn every 3px
+       * with a single dark seam, so it reads as something wound round
+       * something rather than as a ladder. */
+      var pTop = 62, pBot = 137;
+      fillC(g, amb(L, '#8a6a3f'));
+      g.rect(209, pTop, 8, pBot - pTop);
+      for (var y = pTop; y < pBot; y += 3) {
+        fillC(g, rope);
+        g.rect(209, y, 8, 2);
+        fillC(g, ropeD);
+        g.rect(209, y + 2, 8, 1);
+        /* the seam moves right as it climbs, which is what a spiral does */
+        var seam = 209 + (Math.floor((y - pTop) / 6) % 2 ? 6 : 1);
+        g.rect(seam, y, 1, 2);
+      }
 
-      /* lower platform */
-      fillC(g, woodD); g.rect(200, 78, 28, 6);
-      fillC(g, woodL); g.rect(200, 78, 28, 1);
+      /* lower perch, cantilevered to the left, with a bracket */
+      fillC(g, amb(L, '#3a2412'));
+      g.rect(200, 100, 3, 5);
+      fillC(g, woodD); g.rect(189, 99, 22, 5);
+      fillC(g, woodL); g.rect(189, 99, 22, 1);
+      fillC(g, U.mixHex(L.floor, '#000000', 0.18));
+      g.rect(189, 103, 22, 1);
 
-      /* short upper post */
-      fillC(g, rope); g.rect(212, 66, 6, 12);
-      fillC(g, ropeD);
-      for (var y2 = 66; y2 < 78; y2 += 3) g.rect(212, y2, 6, 1);
-
-      /* top bed with a cushion */
-      fillC(g, woodD); g.rect(204, 58, 30, 8);
-      fillC(g, woodL); g.rect(204, 58, 30, 1);
+      /* middle platform, with a lip on the front edge */
+      fillC(g, woodD); g.rect(198, 77, 30, 6);
+      fillC(g, woodL); g.rect(198, 77, 30, 1);
       fillC(g, amb(L, '#8a5c31'));
-      g.rect(204, 58, 3, 8);
-      g.rect(231, 58, 3, 8);
+      g.rect(198, 77, 2, 6);
+      g.rect(226, 77, 2, 6);
+      fillC(g, U.mixHex(L.floor, '#000000', 0.20));
+      g.rect(198, 82, 30, 1);
+
+      /* top bed: a tray with raised sides and a cushion sitting in it */
+      fillC(g, woodD); g.rect(202, 55, 34, 9);
+      fillC(g, woodL); g.rect(202, 55, 34, 1);
+      fillC(g, amb(L, '#8a5c31'));
+      g.rect(202, 55, 3, 9);
+      g.rect(233, 55, 3, 9);
+      fillC(g, U.mixHex(L.floor, '#000000', 0.22));
+      g.rect(202, 63, 34, 1);
       fillC(g, amb(L, '#e76e55', 0.6));
-      g.rect(207, 60, 24, 5);
+      g.rect(206, 58, 26, 4);
       fillC(g, amb(L, '#f3a08c', 0.6));
-      g.rect(207, 60, 24, 1);
+      g.rect(206, 58, 26, 1);
+
+      /* the plinth, last, so the post stands in it rather than on it */
+      fillC(g, woodD); g.rect(192, 132, 46, 6);
+      fillC(g, woodL); g.rect(192, 132, 46, 1);
+      fillC(g, U.mixHex(L.floor, '#000000', 0.24));
+      g.rect(192, 137, 46, 1);
+      fillC(g, woodD); g.rect(196, 133, 38, 4);
+      fillC(g, woodL); g.rect(196, 133, 38, 1);
 
       /* a toy swinging from the bed — Shiro batting it adds to the swing */
       var swing = Math.sin(t * 1.7) * 5 + this._toySwing;
-      var sx0 = 233, sy0 = 66;
+      var sx0 = 236, sy0 = 63;
       var sx1 = sx0 + swing, sy1 = 86;
       fillC(g, U.mixHex(L.wall, '#000000', 0.45));
       pxLine(g, sx0, sy0, sx1, sy1);

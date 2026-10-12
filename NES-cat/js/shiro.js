@@ -277,7 +277,7 @@
       tree: {
         enter: function (sm, from) {
           self.beginActivity(sm, from,
-            { target: NESCAT.Scene.CAT_TREE_X - 22, dur: B.treeDur, phase: 0 });
+            { target: NESCAT.Scene.CAT_TREE_X - NESCAT.Scene.TREE_GAP, dur: B.treeDur, phase: 0 });
         },
         update: function (dt, s) {
           if (!self.arrive(dt, self._act.target)) return;
