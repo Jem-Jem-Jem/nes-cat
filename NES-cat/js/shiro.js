@@ -291,6 +291,36 @@
         }
       },
 
+      /* scratch: raking the post.
+       *
+       * One of the few things a cat does with real commitment — she goes up
+       * on her back legs and alternates her forelegs hard enough that the
+       * whole body rocks with it. It is a forepaw working against a vertical
+       * surface, so profile, and it is a separate state from `tree` rather
+       * than another frame of it: reaching at a toy from the floor and
+       * standing up to rake a post are different animals, and the cat tree
+       * has a bare section of rope between its two perches for exactly this.
+       *
+       * Only offered when she is already near the tree, for the same reason
+       * `tree` is: she is not going to cross the room to scratch something. */
+      scratch: {
+        enter: function (sm, from) {
+          self.beginActivity(sm, from, {
+            target: NESCAT.Scene.CAT_TREE_X - NESCAT.Scene.TREE_GAP,
+            dur: B.scratchDur, phase: 0
+          });
+        },
+        update: function (dt, s) {
+          if (!self.arrive(dt, self._act.target)) return;
+          if (self._act.phase === 0) {
+            self._act.phase = 1;
+            self._sm.time = 0;
+            self.faceFixture();
+          }
+          if (s.time > self._act.dur) self.endActivity();
+        }
+      },
+
       pounce: {
         enter: function (sm, from) {
           self.beginActivity(sm, from, {
@@ -788,8 +818,15 @@
     if (this._awake > 0.3) pool.push(['wash', B.wWash]);
     if (this._sinceWater > B.drinkGap && Sc.water > 0.05) pool.push(['drink', 22]);
     else if (Sc.water > 0.05) pool.push(['drink', 8]);
-    if (Math.abs(this.x - Sc.CAT_TREE_X) < B.treeNearX) pool.push(['tree', B.wTree]);
-    else pool.push(['jump', B.wJump]);
+    pool.push(['jump', B.wJump]);
+    /* She uses the tree when she is standing at it, and only then — she is
+     * not going to cross the room to scratch something. `jump` stays in the
+     * pool either way, because bouncing in the middle of the floor is its own
+     * thing and is not a consolation prize for not being near the post. */
+    if (Math.abs(this.x - Sc.CAT_TREE_X) < B.treeNearX) {
+      pool.push(['tree', B.wTree]);
+      pool.push(['scratch', B.wScratch]);
+    }
     /* the yarn gets two entries: a deliberate stalk-and-pounce, and the
      * impulsive lunge she does when she is already close and cannot be
      * bothered with the suspense. A worn-out cat does neither. */
@@ -1127,7 +1164,8 @@
   Shiro.SIDE_STATES = {
     walk: 1, jump: 1, pounce: 1,
     eat: 1, drink: 1, groom: 1, wash: 1, tree: 1,
-    turn: 1, watch: 1, stretch: 1, knead: 1, chase: 1, stalk: 1, circle: 1
+    turn: 1, watch: 1, stretch: 1, knead: 1, chase: 1, stalk: 1, circle: 1,
+    scratch: 1
   };
 
   /* Two different questions about the view, and they are not interchangeable:
@@ -1282,6 +1320,12 @@
     if (st === 'groom') return (Math.sin(t * 2.2) > 0) ? 'side_groom_0' : 'side_groom_1';
     if (st === 'wash') return (Math.sin(t * 2.6) > 0) ? 'side_wash_0' : 'side_wash_1';
     if (st === 'tree') return (Math.sin(t * 1.9) > 0) ? 'side_tree_0' : 'side_tree_1';
+    if (st === 'scratch') {
+      /* three frames rather than two: at raking speed a two-frame loop is a
+       * flicker, and the third frame is the weight going the other way */
+      if (self._act.phase === 0) return 'side_walk_4';
+      return cyc(['side_scratch_0', 'side_scratch_1', 'side_scratch_2'], 0.12, 5.5);
+    }
 
     /* stretch: arch, hold, ease back. Timed so the hold is the longest
        * beat — the pose itself is the point, not the motion into it. */

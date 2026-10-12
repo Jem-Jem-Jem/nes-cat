@@ -76,6 +76,7 @@
       pounceDur: 0.75,
       pounceHeight: 10,
       treeDur: 2.2,
+      scratchDur: 3.0,
       approachSpeed: 46,
       /* how close counts as "arrived" at a fixture */
       arriveEps: 3,
@@ -91,6 +92,7 @@
       wWatch: 22,
       wWash: 12,
       wTree: 18,
+      wScratch: 22,
       wYarn: 20,
       wJump: 10,
       /* the cat tree is only worth jumping at when she is already near it */

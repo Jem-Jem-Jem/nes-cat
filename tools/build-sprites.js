@@ -768,6 +768,33 @@ function frames() {
     tail: { sway: -0.4, lift: 2.2 }
   }));
 
+  /* scratch: raking the post.
+   *
+   * One of the few things a cat does with real commitment — she goes up on
+   * her back legs and commits to it, alternating forelegs hard enough that
+   * the whole body rocks with it. It is a forepaw doing work against a
+   * vertical surface, so profile, and the near forepaw is drawn over the head
+   * (see the raised-paw rule in buildSideParts) because it is in front of it.
+   *
+   * Three frames, because a two-frame loop at this speed is a flicker: both
+   * forelegs high and rocked back, the near one raked down while the far one
+   * comes up, then high again with the weight the other way. */
+  const scratch = (nearLift, farLift, bodyY, headDY) => ({
+    bodyY: bodyY, bodyRX: 6.4, bodyRY: 4.2,
+    headDX: 0.8, headDY: headDY,
+    eyes: 'wide', earPerk: 0.4, mouth: 'open',
+    legs: { farBack: { hide: true }, nearBack: { lift: 1 },
+            farFront: { x: 20.5, lift: farLift },
+            nearFront: { x: 22.0, lift: nearLift } },
+    tail: { sway: 1.2, lift: 1.6 }
+  });
+  /* The paw has to come up past the shoulder or it is behind the body and
+   * the pose is just a cat standing up. Above the head it is drawn in front
+   * of the face, which is what a raking forepaw looks like. */
+  side('scratch_0', scratch(18, 11, -2.6, -0.6));  /* both up, rocked back */
+  side('scratch_1', scratch(11, 19, -1.6, 0.4));   /* near raked down, far up */
+  side('scratch_2', scratch(19, 11, -2.8, -0.8));  /* high again, weight back */
+
   /* pounce: the yarn-ball lunge — coil, spring, land */
   side('pounce_0', { eyes: 'wide', earPerk: 1, bodyY: 2.2, squash: 1.4, headDY: 1.0,
     legs: { nearFront: { lift: 2 }, farFront: { lift: 2 }, nearBack: { hide: true }, farBack: { hide: true } },
