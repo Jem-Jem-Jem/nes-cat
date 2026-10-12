@@ -121,7 +121,7 @@
       frame: function (sc) { return sc.water > 0.02 ? 'bowl_water' : 'bowl_water_empty'; }
     },
     tree: {
-      sprite: null, ax: 23, ay: 82, x: 215, y: 138,
+      sprite: 'tree', ax: 0, ay: 0, x: 188, y: 55,
       /* Not solid, and the reason is the draw order: the room is painted
        * before her, so she is always in front of the furniture. What meets her
        * at floor level is a 6px plinth, and standing in front of a plinth
@@ -136,14 +136,35 @@
       shadowW: 46
     },
     plant: {
-      sprite: null, ax: 11, ay: 38, x: 271, y: 140,
+      sprite: 'plant', ax: 20, ay: 41, x: 271, y: 142,
       /* Solid, and for the opposite reason. The pot is 22px of solid rim at
        * exactly her height, and because she is drawn in front of it, being
        * "inside" the plant puts her legs over the front of the pot with the
        * rim crossing them. That reads as a cat standing in a bucket. */
       solid: true, grab: false, label: 'the plant',
       collideW: 22, collideX: 0,           /* the pot */
-      shadowW: 22
+      shadowW: 22,
+      /* eight frames of the fronds swaying, at four a second. The hand-drawn
+       * version had a seven-second period, and eight frames over seven
+       * seconds is barely one frame a second — a stutter, not a sway. */
+      frame: function (sc) {
+        return 'plant_' + (Math.floor(sc.time * 4) % 8);
+      }
+    },
+    toy: {
+      sprite: 'toy', ax: 5, ay: 0, x: 233, y: 64,
+      solid: false, grab: false, label: 'the dangling toy',
+      /* The frame carries the ambient swing; being batted is a *position*
+       * offset rather than another frame. That is not a shortcut — a frame
+       * chooser for an arbitrary swing value has to map a continuous quantity
+       * onto a discrete cycle, and the mapping is discontinuous where the
+       * pendulum passes vertical, so the toy would jump. Offsetting keeps the
+       * kick smooth and leaves the loop to do what loops do. */
+      frame: function (sc) {
+        var f = Math.floor(sc.time * 1.7 / (Math.PI * 2) * 5);
+        return 'toy_' + (((f % 5) + 5) % 5);
+      },
+      dx: function (sc) { return sc._toySwing; }
     }
   };
   var SOLID = Object.keys(OBJECTS).filter(function (k) { return OBJECTS[k].solid; });
@@ -259,17 +280,26 @@
 
     /* Which frame an object is on right now. For the bowls that is the level
      * of what is in them, so an empty bowl is a different picture and not the
-     * same picture with the contents painted over. */
+     * same picture with the contents painted over. For a thing that does not
+     * move, it is simply its one frame. */
     objectFrame: function (name) {
       var d = OBJECTS[name];
       if (d.frame) return d.frame(this);
+      var sprite = d.sprite && this.sprites ? this.sprites[d.sprite] : null;
+      if (!sprite) return null;
       if (name === 'yarn') {
         /* the wind's phase is already a 0..2pi roll; cycle the six frames off
          * it, which is what turns a rolling ball into a rolling ball rather
          * than a sliding one */
-        return 'yarn_' + (Math.floor(this._yarnPhase / (Math.PI * 2) * 6) % 6 + 6) % 6;
+        return 'yarn_' + ((Math.floor(this._yarnPhase / (Math.PI * 2) * 6) % 6) + 6) % 6;
       }
-      return null;
+      /* A static object: one frame, and that is the whole of it. Falling back
+       * to "null unless it says" left the cat tree with no frame at all and it
+       * simply did not draw — which is the kind of silence a drawing call
+       * never produces, because `Sprite.draw` returns quietly on a frame it
+       * cannot find. */
+      var keys = Object.keys(sprite.frames);
+      return keys.length === 1 ? keys[0] : null;
     },
 
     /* An object's box on screen, or null for something not yet a sprite.
@@ -286,22 +316,27 @@
       return { x: this.objectX(name) - d.ax, y: d.y - d.ay, w: w, h: h };
     },
 
-    /* Which object a point is on, or null. Later entries win, so a thing that
-     * overlaps another is reachable in front of it.
+    /* Which object a point is on, or null.
      *
      * This is the whole of "is the room interactive": before the room went
      * through the sprite API there was nothing to ask this question with. The
      * only hit test in the piece was `_hitShiro`, which is a bounding box
      * against a hardcoded 32, and it could not have answered this — it does
-     * not know what else there is, or how big it is. */
+     * not know what else there is, or how big it is.
+     *
+     * Later entries win, which is the z-order: the toy's box sits entirely
+     * inside the cat tree's, so returning the first match made the toy
+     * unreachable and clicking it scratched the post instead. The drawing
+     * order is the order in OBJECTS, so the last hit *is* the one on top. */
     objectAt: function (px, py) {
-      for (var i = 0; i < Object.keys(OBJECTS).length; i++) {
-        var name = Object.keys(OBJECTS)[i];
-        var b = this.box(name);
+      var names = Object.keys(OBJECTS);
+      var hit = null;
+      for (var i = 0; i < names.length; i++) {
+        var b = this.box(names[i]);
         if (!b) continue;
-        if (px >= b.x && px < b.x + b.w && py >= b.y && py < b.y + b.h) return name;
+        if (px >= b.x && px < b.x + b.w && py >= b.y && py < b.y + b.h) hit = names[i];
       }
-      return null;
+      return hit;
     },
 
     /* ---------- picking things up ----------------------------------------
@@ -1181,7 +1216,8 @@
       var frame = this.objectFrame(name);
       if (!frame || !sprite.frames[frame]) return;
       NESCAT.Sprite.draw(g, sprite, frame,
-        this.objectX(name) - d.ax, d.y - d.ay,
+        this.objectX(name) - d.ax + (d.dx ? d.dx(this) : 0),
+        d.y - d.ay,
         { ambient: L.ambient, ambientAmt: L.ambientAmt * (k == null ? 0.6 : k) });
     },
 
@@ -1217,135 +1253,30 @@
 
     /* ---------- cat tree ---------------------------------------------------- */
 
-    /* The cat tree: a plinth, a rope-wrapped post, two perches and a bed.
+    /* The cat tree, its shadow, and the toy hanging off it.
      *
-     * It is the tallest thing in the room and the thing she reaches for, so it
-     * gets a real profile rather than a stick and two shelves. Two things took
-     * a second pass to get right: the plinth has to be drawn *after* the post
-     * or the post draws over it and the base reads as a shadow behind a
-     * stick; and the rope has to be wound tight enough to read as wrap rather
-     * than as the rungs of a ladder. */
+     * The tree itself does not move, so it is one frame. The rope's seam steps
+     * right as it climbs — which is what a spiral does, and what stops it
+     * reading as the rungs of a ladder — and the plinth is stamped last so
+     * the post stands *in* the base rather than on it. Both were got right
+     * the hard way by hand and both are preserved here.
+     *
+     * The toy is a separate object rather than part of the tree because it
+     * moves, and because it is the thing you actually click: touching it is
+     * how you ask her to reach up at it. */
     drawCatTree: function (g, L) {
-      var t = this.time;
-      var woodD = amb(L, '#4a3018');
-      var woodL = amb(L, '#7a4f28');
-      var rope = amb(L, '#c9a86b');
-      var ropeD = amb(L, '#a3854f');
-
-      /* shadow on the boards, cast away from the window */
-      fillC(g, U.mixHex(L.floor, '#000000', 0.30));
-      g.rect(197, 141, 42, 2);
-      g.rect(202, 143, 34, 1);
-
-      /* the post, wrapped in rope. Wound on the diagonal, a turn every 3px
-       * with a single dark seam, so it reads as something wound round
-       * something rather than as a ladder. */
-      var pTop = 62, pBot = 137;
-      fillC(g, amb(L, '#8a6a3f'));
-      g.rect(209, pTop, 8, pBot - pTop);
-      for (var y = pTop; y < pBot; y += 3) {
-        fillC(g, rope);
-        g.rect(209, y, 8, 2);
-        fillC(g, ropeD);
-        g.rect(209, y + 2, 8, 1);
-        /* the seam moves right as it climbs, which is what a spiral does */
-        var seam = 209 + (Math.floor((y - pTop) / 6) % 2 ? 6 : 1);
-        g.rect(seam, y, 1, 2);
-      }
-
-      /* lower perch, cantilevered to the left, with a bracket */
-      fillC(g, amb(L, '#3a2412'));
-      g.rect(200, 100, 3, 5);
-      fillC(g, woodD); g.rect(189, 99, 22, 5);
-      fillC(g, woodL); g.rect(189, 99, 22, 1);
-      fillC(g, U.mixHex(L.floor, '#000000', 0.18));
-      g.rect(189, 103, 22, 1);
-
-      /* middle platform, with a lip on the front edge */
-      fillC(g, woodD); g.rect(198, 77, 30, 6);
-      fillC(g, woodL); g.rect(198, 77, 30, 1);
-      fillC(g, amb(L, '#8a5c31'));
-      g.rect(198, 77, 2, 6);
-      g.rect(226, 77, 2, 6);
-      fillC(g, U.mixHex(L.floor, '#000000', 0.20));
-      g.rect(198, 82, 30, 1);
-
-      /* top bed: a tray with raised sides and a cushion sitting in it */
-      fillC(g, woodD); g.rect(202, 55, 34, 9);
-      fillC(g, woodL); g.rect(202, 55, 34, 1);
-      fillC(g, amb(L, '#8a5c31'));
-      g.rect(202, 55, 3, 9);
-      g.rect(233, 55, 3, 9);
-      fillC(g, U.mixHex(L.floor, '#000000', 0.22));
-      g.rect(202, 63, 34, 1);
-      fillC(g, amb(L, '#e76e55', 0.6));
-      g.rect(206, 58, 26, 4);
-      fillC(g, amb(L, '#f3a08c', 0.6));
-      g.rect(206, 58, 26, 1);
-
-      /* the plinth, last, so the post stands in it rather than on it */
-      fillC(g, woodD); g.rect(192, 132, 46, 6);
-      fillC(g, woodL); g.rect(192, 132, 46, 1);
-      fillC(g, U.mixHex(L.floor, '#000000', 0.24));
-      g.rect(192, 137, 46, 1);
-      fillC(g, woodD); g.rect(196, 133, 38, 4);
-      fillC(g, woodL); g.rect(196, 133, 38, 1);
-
-      /* a toy swinging from the bed — Shiro batting it adds to the swing */
-      var swing = Math.sin(t * 1.7) * 5 + this._toySwing;
-      var sx0 = 236, sy0 = 63;
-      var sx1 = sx0 + swing, sy1 = 86;
-      fillC(g, U.mixHex(L.wall, '#000000', 0.45));
-      pxLine(g, sx0, sy0, sx1, sy1);
-      disc(g, sx1, sy1 + 3, 3, 3, g.color(amb(L, C.warning)));
-      fillC(g, amb(L, '#fff3a8'));
-      g.rect(Math.round(sx1) - 1, Math.round(sy1) + 2, 2, 1);
-      fillC(g, U.mixHex(L.wall, '#000000', 0.35));
-      g.rect(Math.round(sx1) - 3, Math.round(sy1) + 3, 6, 1);
+      this.drawShadow(g, L, 'tree');
+      this.drawObject(g, L, 'tree');
+      this.drawObject(g, L, 'toy');
     },
 
     /* ---------- plant ------------------------------------------------------- */
 
     drawPlant: function (g, L) {
-      var t = this.time;
-      var px = 271;
-      var base = this.FLOOR_TOP + 26;    /* 142 — the floor line */
-
-      /* shadow */
-      var sh = g.color('#000000');
-      sh.setAlpha(70);
-      disc(g, px, base + 1, 15, 4, sh);
-
-      /* pot */
-      fillC(g, amb(L, '#7a4423'));
-      g.rect(px - 11, base - 16, 22, 16);
-      fillC(g, amb(L, '#b5763f'));
-      g.rect(px - 10, base - 15, 20, 14);
-      fillC(g, amb(L, '#6d3c1f'));
-      g.rect(px - 11, base - 16, 22, 2);
-      fillC(g, amb(L, '#3c2a1a'));
-      g.rect(px - 8, base - 14, 16, 2);
-
-      /* fronds, each on its own phase so they never move in lockstep */
-      var fronds = [
-        { a: -1.05, len: 17, r: 4 },
-        { a: -0.55, len: 21, r: 5 },
-        { a: 0.00, len: 24, r: 5 },
-        { a: 0.55, len: 21, r: 5 },
-        { a: 1.05, len: 17, r: 4 }
-      ];
-      var soilY = base - 15;
-      for (var i = 0; i < fronds.length; i++) {
-        var f = fronds[i];
-        var sway = Math.sin(t * 0.9 + i * 0.85) * 1.7;
-        var ex = px + Math.sin(f.a) * f.len + sway;
-        var ey = soilY - Math.cos(f.a) * f.len + Math.abs(sway) * 0.4;
-        fillC(g, amb(L, '#3f7a30', 0.7));
-        pxLine(g, px, soilY, ex, ey);
-        disc(g, ex, ey, f.r, f.r - 1, g.color(amb(L, '#4f8f3a', 0.7)));
-        fillC(g, amb(L, '#6fb854', 0.7));
-        g.rect(Math.round(ex) - 1, Math.round(ey) - 1, 3, 1);
-      }
+      /* Eight frames of the fronds, each offset three frames from its
+       * neighbour so they never move in lockstep. */
+      this.drawShadow(g, L, 'plant');
+      this.drawObject(g, L, 'plant', 0.7);
     },
 
     /* ---------- yarn -------------------------------------------------------- */

@@ -1048,8 +1048,15 @@
         if (Sc.water <= 0.02) { Sc.water = 1; say('nom'); this._sinceWater = 0; }
         this._sm.set('drink');
         return true;
+      /* The dangling toy hangs off the cat tree, so touching it is touching the
+       * tree — except that the toy is the bit you would actually reach for, so
+       * it gets its own entry: she goes over and bats it, which is a
+       * different thing from going over to scratch the post. */
       case 'tree':
         this._sm.set('scratch');
+        return true;
+      case 'toy':
+        this._sm.set('tree');
         return true;
       case 'yarn':
         /* A ball just thrown by hand is the best possible reason to hunt, so

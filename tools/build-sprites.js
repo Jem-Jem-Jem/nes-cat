@@ -1139,14 +1139,221 @@ const SCENE_PALETTES = {
   bowl: {
     k: '#2b1c14', C: '#8a5c31', R: '#a06a3c', l: '#ffffff',
     F: '#c06a2e', W: '#4a9fd8'
+  },
+  plant: {
+    k: '#2c1a10', C: '#7a4423', R: '#b5763f', D: '#6d3c1f', E: '#3c2a1a',
+    S: '#3f7a30', G: '#4f8f3a', H: '#6fb854'
+  },
+  tree: {
+    k: '#241608', W: '#7a4f28', d: '#4a3018', L: '#9a6c38',
+    R: '#c9a86b', r: '#a3854f', C: '#3a2412', T: '#e76e55', U: '#f3a08c'
+  },
+  toy: {
+    k: '#6b5a2a', Y: '#f2c230', l: '#fff3a8', d: '#a8862a'
   }
 };
+
+/* ---------- a line, on a char grid -------------------------------------- */
+
+/* Bresenham into a grid. The cat rig has its own, but that one paints; this
+ * one stamps characters, and it has to respect whatever is already there — a
+ * stem crossing a leaf should not erase the leaf. */
+function pxLineTo(G, x0, y0, x1, y1, ch, W, H) {
+  x0 = Math.round(x0); y0 = Math.round(y0);
+  x1 = Math.round(x1); y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  for (;;) {
+    if (x0 >= 0 && x0 < W && y0 >= 0 && y0 < H && G[y0][x0] === '.') G[y0][x0] = ch;
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= -dy) { err -= dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+}
+
+function discOn(G, cx, cy, r, ch, W, H, onlyEmpty) {
+  for (let y = -r; y <= r; y++) {
+    for (let x = -r; x <= r; x++) {
+      if (x * x + y * y > r * r + r * 0.4) continue;
+      const px = Math.round(cx + x), py = Math.round(cy + y);
+      if (px < 0 || px >= W || py < 0 || py >= H) continue;
+      if (onlyEmpty && G[py][px] !== '.') continue;
+      G[py][px] = ch;
+    }
+  }
+}
+
+/* ---------- the plant ---------------------------------------------------
+ *
+ * Eight frames of the fronds swaying, each frond offset three frames from its
+ * neighbour so they never move in lockstep — which is what the hand-drawn one
+ * did with `Math.sin(t*0.9 + i*0.85)`, quantised to a loop.
+ *
+ * The loop rate is a deliberate change rather than a translation. The original
+ * period was seven seconds, and eight frames over seven seconds is a bit over
+ * one frame a second, which for a *sway* is a stutter rather than a movement.
+ * Two seconds is twice as fast and still the same gesture, and it is the rate
+ * the room's other loops run at.
+ *
+ * Anchored on the base of the pot, forty wide because the outermost frond
+ * reaches fifteen to the side and its leaf is five more. Anchored on anything
+ * narrower the two outside leaves are simply cropped off, and a plant with
+ * its edges shaved off reads as a mistake rather than as a crop.
+ */
+function plantFrames() {
+  const W = 40, H = 42, CX = 20, BASE = H - 1;
+  const FRONDS = [
+    { a: -1.05, len: 17, r: 4 }, { a: -0.55, len: 21, r: 5 },
+    { a: 0.00, len: 24, r: 5 }, { a: 0.55, len: 21, r: 5 },
+    { a: 1.05, len: 17, r: 4 }
+  ];
+  const out = {};
+  for (let f = 0; f < 8; f++) {
+    const G = gridOf(W, H);
+    /* soil line: the top of the pot, where the fronds come out */
+    const soilY = BASE - 15;
+
+    for (let i = 0; i < FRONDS.length; i++) {
+      const fr = FRONDS[i];
+      /* three frames of offset between neighbours, so over the eight-frame
+       * loop each frond runs a full cycle and no two are ever in step */
+      const sway = Math.sin(((f + i * 3) / 8) * Math.PI * 2) * 1.7;
+      const ex = CX + Math.sin(fr.a) * fr.len + sway;
+      const ey = soilY - Math.cos(fr.a) * fr.len + Math.abs(sway) * 0.4;
+      pxLineTo(G, CX, soilY, ex, ey, 'S', W, H);
+      discOn(G, ex, ey, fr.r, 'G', W, H);
+      /* the catch-light on the top of each leaf */
+      G[Math.round(ey) - 1][Math.round(ex) - 1] = 'H';
+      G[Math.round(ey) - 1][Math.round(ex)] = 'H';
+    }
+
+    /* the pot, over the roots of the stems: a terracotta body, a lit lip, a
+     * dark rim and the soil line the stems come out of */
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 22; x++) {
+        const py = BASE - 16 + y;
+        G[py][CX - 11 + x] =
+          (y === 0) ? 'k' : (y === 1 ? 'R' : (y === 2 ? 'D' : (x === 0 || x === 21 ? 'k' : 'C')));
+      }
+    }
+    /* the soil, and the shadow it throws on the inside of the pot */
+    for (let x = -9; x <= 9; x++) { G[BASE - 15][CX + x] = 'D'; G[BASE - 14][CX + x] = 'E'; }
+    out['plant_' + f] = toRows(G);
+  }
+  return out;
+}
+
+/* ---------- the cat tree ------------------------------------------------
+ *
+ * One frame: it does not move. Anchored at the left of the lower perch rather
+ * than at the plinth, because the perch overhangs the plinth on the left and
+ * anchoring on the plinth would crop it.
+ *
+ * Two details from the hand-drawn version are preserved because they were
+ * right and are easy to lose: the rope's seam moves right as it climbs, which
+ * is what a spiral does and what stops it reading as the rungs of a ladder;
+ * and the plinth is stamped last, so the post stands *in* the base rather than
+ * on it. The post is otherwise drawn straight over the top of the plinth and
+ * the base reads as a shadow behind a stick.
+ */
+function treeFrames() {
+  /* frame coords are world minus (188, 55) */
+  const W = 52, H = 84, out = {};
+  const G = gridOf(W, H);
+  const rect = (x, y, w, h, ch) => {
+    for (let yy = y; yy < y + h; yy++) {
+      for (let xx = x; xx < x + w; xx++) {
+        if (xx >= 0 && xx < W && yy >= 0 && yy < H) G[yy][xx] = ch;
+      }
+    }
+  };
+  const postX = 21, postTop = 7, postBot = 82;
+
+  /* the post, wrapped in rope */
+  rect(postX, postTop, 8, postBot - postTop, 'r');
+  for (let y = postTop; y < postBot; y += 3) {
+    rect(postX, y, 8, 2, 'R');
+    const seam = postX + (Math.floor((y - postTop) / 6) % 2 ? 6 : 1);
+    rect(seam, y, 1, 2, 'r');
+  }
+
+  /* lower perch, cantilevered left, with a bracket under its inner end */
+  rect(1, 44, 22, 5, 'W');
+  rect(1, 44, 22, 1, 'L');
+  rect(1, 48, 22, 1, 'k');
+  rect(12, 45, 3, 5, 'C');
+
+  /* middle platform, with a lip standing proud at each end */
+  rect(10, 22, 30, 6, 'W');
+  rect(10, 22, 30, 1, 'L');
+  rect(10, 27, 30, 1, 'k');
+  rect(10, 22, 2, 6, 'd');
+  rect(38, 22, 2, 6, 'd');
+
+  /* top bed: a tray with raised sides and a cushion sitting in it */
+  rect(14, 0, 34, 9, 'W');
+  rect(14, 0, 34, 1, 'L');
+  rect(14, 8, 34, 1, 'k');
+  rect(14, 0, 3, 9, 'd');
+  rect(45, 0, 3, 9, 'd');
+  rect(18, 3, 26, 4, 'T');
+  rect(18, 3, 26, 1, 'U');
+
+  /* the plinth, last, so the post stands in it rather than on it */
+  rect(4, 77, 46, 6, 'W');
+  rect(4, 77, 46, 1, 'L');
+  rect(4, 82, 46, 1, 'k');
+  rect(8, 78, 38, 4, 'd');
+  rect(8, 78, 38, 1, 'L');
+
+  out.tree = toRows(G);
+  return out;
+}
+
+/* ---------- the hanging toy ---------------------------------------------
+ *
+ * Five frames of the pendulum, string and ball together. The string is part
+ * of the frame rather than a pxLine so that the whole toy is one addressable
+ * object with one size — the same reason the yarn's unravelled strand is in
+ * its frame.
+ */
+function toyFrames() {
+  /* Thirty-two tall, not twenty-eight: the ball's centre sits 26px below the
+   * pivot and it is six across, so the last row of its shading fell off the
+   * bottom of a shorter frame. The unused-colour note in --check is how that
+   * showed up. */
+  const W = 11, H = 32, out = {};
+  for (let f = 0; f < 5; f++) {
+    const G = gridOf(W, H);
+    const put = (x, y, c) => {
+      x = Math.round(x); y = Math.round(y);
+      if (x >= 0 && x < W && y >= 0 && y < H) G[y][x] = c;
+    };
+    /* -1 .. 1 across the swing, which is the ±5px the hand-drawn version used */
+    const swing = Math.sin((f / 5) * Math.PI * 2) * 4;
+    /* the pivot is at the top-centre of the frame */
+    const px = 5 + swing, py = 26;
+    pxLineTo(G, 5, 0, px, py, 'k', W, H);
+    discOn(G, px, py + 2, 3, 'Y', W, H);
+    put(px - 1, py + 1, 'l');
+    put(px, py + 1, 'l');
+    /* the shaded underside */
+    for (let x = -2; x <= 2; x++) put(px + x, py + 4, 'd');
+    out['toy_' + f] = toRows(G);
+  }
+  return out;
+}
 
 /* Everything the room draws through the sprite API, as data. */
 function sceneSprites() {
   return {
     yarn: { name: 'yarn', charColors: SCENE_PALETTES.yarn, frames: yarnFrames() },
-    bowl: { name: 'bowl', charColors: SCENE_PALETTES.bowl, frames: bowlFrames() }
+    bowl: { name: 'bowl', charColors: SCENE_PALETTES.bowl, frames: bowlFrames() },
+    plant: { name: 'plant', charColors: SCENE_PALETTES.plant, frames: plantFrames() },
+    tree: { name: 'tree', charColors: SCENE_PALETTES.tree, frames: treeFrames() },
+    toy: { name: 'toy', charColors: SCENE_PALETTES.toy, frames: toyFrames() }
   };
 }
 

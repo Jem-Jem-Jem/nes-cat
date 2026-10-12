@@ -65,6 +65,7 @@ to do whatever that object is for:
 | **the food bowl** | she eats. If it's empty, clicking it fills it and she goes anyway |
 | **the water bowl** | she drinks, same deal |
 | **the cat tree** | she goes over and scratches the post |
+| **the dangling toy** | she goes over and bats it, and it swings |
 | **the plant** | she goes over and stares at it, which is what cats do with plants |
 
 That is possible because the room is drawn through the same sprite API as the
@@ -186,6 +187,31 @@ rather than being one global table the cat and the furniture both have to
 agree about. The frames are still lit through `Sprite.draw`'s ambient, at the
 same weight the hand-drawn room used, so becoming a sprite did not also change
 how the light falls on them.
+
+All five are in now: the yarn, the bowls, the plant, the cat tree and the
+toy hanging off it. That is every object the room will ever let you touch.
+The picture, the clock, the lamp, the shelf and the curtain are still drawing
+calls, and that is a deliberate line rather than an unfinished job — they are
+flat wall dressing with nothing to be hit or collided against, and converting
+them would be making files for the sake of it.
+
+Three of them are where the interesting decisions ended up:
+
+- **The plant's loop is faster than it was.** Eight frames of fronds, each
+  offset three frames from its neighbour so they never move in lockstep. The
+  hand-drawn version had a seven-second period, and eight frames over seven
+  seconds is a bit over one frame a second — for a *sway* that is a stutter
+  rather than a movement. Two seconds is twice as fast and still the same
+  gesture.
+- **The toy's frame carries the ambient swing; being batted is a position
+  offset.** Not a shortcut. A frame chooser for an arbitrary swing value has
+  to map a continuous quantity onto a discrete cycle, and that mapping is
+  discontinuous where the pendulum passes vertical — so the toy jumps every
+  time it crosses the middle.
+- **`objectAt()` returns the *last* hit, not the first.** The toy's box sits
+  entirely inside the cat tree's, so taking the first match made the toy
+  unreachable and clicking it scratched the post instead. The drawing order
+  is the order in `OBJECTS`, so the last hit is the one on top.
 
 ## Rendering
 
