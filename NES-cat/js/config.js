@@ -33,6 +33,9 @@
       sitMax: 11.0,
       reactMin: 1.5,
       reactMax: 2.4,
+      /* bump: the headbutt into a hand. A short press is one; holding the
+       * press keeps her in it, easing in and out as long as you do. */
+      bumpDur: 0.95,
       /* Sleeping is a function of the clock and of how long she has been up,
        * not of a bar. `sleepChanceNight/Day` are ceilings, scaled by how worn
        * out she is and suppressed entirely until `sinceSleepGap` has passed,

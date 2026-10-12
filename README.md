@@ -46,7 +46,7 @@ There are no runtime npm dependencies: `npm install` is not required, and
 
 | Gesture | What happens |
 |---|---|
-| Click / hold **Shiro** | Pet her — hearts pop, she leans into it |
+| Click / hold **Shiro** | She headbutts your hand, and leans into it for as long as you hold |
 | **Drag** Shiro | Pick her up and carry her; she dangles, kicks, then settles |
 | Click **anywhere else** in the room | Play — notes pop and she reacts |
 | Move the cursor | Her eyes follow it |
@@ -171,10 +171,16 @@ of the approach, so she would pivot forever.
 flourishes), `sit`, `sleep`, `react`, and whole postures that are not
 flourish overlays: `stretch` (rump up, forelegs slid forward, hold, release),
 `loaf` (tucked into a single mound) and `knead` (a forepaw pressing into a
-blanket). `alert` is in the same family. `loaf` and `sleep` are front view and
-one shape with no neck; `stretch` and `knead` are profile, because a spine
-uncoiling and a leg doing work are exactly the two things a front view cannot
-show.
+blanket). `alert` and `nod` (sitting up and losing a fight with sleep) are in
+the same family. `loaf` and `sleep` are front view and one shape with no neck;
+`stretch` and `knead` are profile, because a spine uncoiling and a leg doing
+work are exactly the two things a front view cannot show.
+
+**Answering a hand.** `bump` is a headbutt. A press is one; holding the
+press keeps her in it, leaning in and easing back on a slow breath for as long
+as your hand stays, and she goes back to the room when you let go. It is
+deliberately not mirror-symmetric — she is pressing into a hand on one side —
+so `--check` exempts it the way it exempts the shake.
 
 **Settling.** `circle` is a code animation with no new art: she tramples a
 spot, turning on it in profile, and half of all loaves arrive through it. A

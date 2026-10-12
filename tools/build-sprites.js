@@ -661,6 +661,26 @@ function frames() {
    * makes the droop read as a droop and not as a pose she chose. */
   pose('nod_3', Object.assign({}, sitBase, { eyes: 'wide', headDY: -0.6, earPerk: 1.0, tailUp: 0.5 }));
 
+  /* --- bump: a headbutt into a hand.
+   *
+   * The first thing a cat does about a hand that arrives is not to enjoy it,
+   * it is to push the top of its skull into it — scent glands, and an
+   * assertion about who owns what. Hearts alone said "she likes this"; the
+   * headbutt says she is participating.
+   *
+   * The head goes forward and down and slightly to one side, which is the
+   * shape a cat actually makes: not a nuzzle, a press. mergeHead is off here
+   * deliberately — the head is thrust *forward* and has to read as a separate
+   * shape doing the thrusting, not as a skull settling into a body. --- */
+  const bumpA = {
+    eyes: 'closed', earPerk: 0.5, mouth: 'smile',
+    bodyDY: 0.3, squash: 0.3, tailUp: 0.4
+  };
+  pose('bump_0', Object.assign({}, bumpA, { headDX: -1.6, headDY: 1.2 }));
+  pose('bump_1', Object.assign({}, bumpA, { headDX: -2.4, headDY: 2.2, squash: 0.7 }));
+  /* easing back out, head still down and to the side */
+  pose('bump_2', Object.assign({}, bumpA, { headDX: -0.8, headDY: 0.6, squash: 0.1 }));
+
   /* --- shake: the full-body shudder she does the instant she is put down.
    *
    * headDX swings the whole skull side to side — the ears and face travel
@@ -955,8 +975,10 @@ const F = frames();
  * front-on sprite, and it is what lets one frame read as facing left or
  * right. Exemptions there are deliberate: the tail (read from the exact
  * mask the builder stamped, since a raised tail sits far higher than a
- * hanging one), the alternating walk paw, the eye glance, and the one-paw-up
- * grooming poses.
+ * hanging one), the alternating walk paw, the eye glance, the one-paw-up
+ * grooming poses, and the two poses that press her head to one side — the
+ * shake on landing and the headbutt into a hand, both of which are the head
+ * travelling sideways on purpose.
  *
  * SIDE frames are asymmetric by nature — she is in profile, facing right, to
  * be mirrored at draw time. So they are only checked for shape: right size,
@@ -986,11 +1008,13 @@ function checkFrames() {
         const looking = k.indexOf('look') >= 0;
         const onePaw = k.indexOf('groom') === 0 || k.indexOf('wash') === 0;
         const shaking = k.indexOf('shake') === 0;
+        const bumping = k.indexOf('bump') === 0;
         if (tail && tail[y][x]) continue;              /* the tail */
         if (walking && y >= 26) continue;              /* alternating paw */
         if (looking) continue;                         /* eye glance */
         if (onePaw) continue;                          /* one paw raised */
         if (shaking) continue;                         /* head swung side to side */
+        if (bumping) continue;                         /* head pressed to one side */
 
         if (row[x] !== row[W - 1 - x]) {
           bad++;

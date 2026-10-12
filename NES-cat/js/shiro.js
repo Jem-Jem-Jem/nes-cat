@@ -571,6 +571,28 @@
         }
       },
 
+      /* bump: a headbutt into the hand.
+       *
+       * The first thing a cat does about a hand that arrives is not to enjoy
+       * it, it is to push the top of its skull into it. Hearts alone said
+       * "she likes this"; the headbutt says she is participating.
+       *
+       * A press is one bump; holding the press keeps her in it, leaning in
+       * and easing back on a slow breath for as long as your hand stays, and
+       * she goes back to the room when you let go. */
+      bump: {
+        enter: function (sm, from, payload) {
+          self._act = { dur: B.bumpDur };
+          if (payload && payload.say) say(payload.say);
+        },
+        update: function (dt, s) {
+          self._bob += dt * B.bobSpeed * 0.5;
+          /* held: stay in it for as long as the hand does */
+          if (self.petting) return;
+          if (s.time > self._act.dur) sm.set('react');
+        }
+      },
+
       /* nod: sitting up and losing a fight with sleep.
        *
        * The droop comes back up, then goes down further, and eventually does
@@ -885,10 +907,14 @@
   /* ---------- interactions --------------------------------------------- */
 
   Shiro.petStart = function () {
-    if (this._sm.is('sleep')) { this.wake(); }
+    if (this._sm.is('sleep')) { this.wake(); return; }
     this.petting = true;
     this._petBlock = 0;
     this.spawn('heart');
+    /* a hand arriving is answered with the side of her head, not with a
+     * state change the player did not ask for — so this is the bump, and it
+     * says something on its own */
+    this._sm.set('bump', { say: 'pet' });
   };
 
   Shiro.petStop = function () { this.petting = false; };
@@ -1370,6 +1396,18 @@
     /* loaf: just breathing, until she decides to unfold */
     if (st === 'loaf') {
       return (Math.sin(t * 1.7) > 0) ? 'loaf_0' : 'loaf_1';
+    }
+
+    if (st === 'bump') {
+      /* held: a slow nuzzle, leaning in and easing back, for as long as the
+       * hand stays. A single press is the same three frames in one go. */
+      if (self.petting) {
+        return (Math.sin(this._bob * 1.7) > 0) ? 'bump_1' : 'bump_0';
+      }
+      var bp = t / Bh.bumpDur;
+      if (bp < 0.32) return 'bump_0';
+      if (bp < 0.66) return 'bump_1';
+      return 'bump_2';
     }
 
     /* nod: a droop, a recover, and then one that does not recover.

@@ -137,6 +137,10 @@ const CASES = [
   { state: 'circle', secs: 7, payload: { then: 'loaf' } },
   { state: 'scratch', secs: 7, before: s => { s.x = 250; } },
   { state: 'nod', secs: 7, night: true },
+  { state: 'bump', secs: 2.5, payload: { say: null } },
+  /* a held press never lets her leave `bump`, and that branch is chosen on a
+   * slow breath rather than on the state's clock, so it needs its own pass */
+  { state: 'bump', secs: 3, after: s => { s.petting = true; } },
   { state: 'ruffle', secs: 2.5 }
 ];
 
@@ -224,7 +228,12 @@ function main() {
     if (c.state === 'loaf') Shiro._awake = 0.9;
 
     Shiro._sm.set(c.state, c.payload || {});
+    /* `after` is a one-off setup that has to run after the reset above and be
+     * undone afterwards — e.g. setting `petting`, which is what makes a press
+     * hold her in `bump` instead of letting it run out. */
+    if (c.after) c.after(Shiro);
     const r = run(Shiro, c.secs);
+    if (c.after) Shiro.petting = false;
 
     if (r.missing.length) {
       bad += r.missing.length;
