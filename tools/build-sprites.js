@@ -958,6 +958,198 @@ function frames() {
   return out;
 }
 
+/* ============================================================
+ * THE ROOM'S OBJECTS
+ *
+ * The same framework, used for the furniture. This is not tidiness — it is
+ * what makes a scene object *addressable*.
+ *
+ * The room was 184 calls to rect/disc/pxLine, which is a picture and nothing
+ * else: nothing in a pile of drawing calls knows how big the yarn ball is, so
+ * there is no way to ask whether a click landed on it, and no way to stop a
+ * cat walking through the plant. Both of those were true — she could be
+ * dropped exactly onto the planter and the game was perfectly happy about it.
+ *
+ * As frames, the same data answers all three questions at once. A frame has a
+ * width and a height, so it *is* the hit box and it *is* the collider; the
+ * string that draws it is the thing you point at. One source, no bookkeeping
+ * that can disagree with what is on screen.
+ *
+ * Each object carries its own `charColors`, so a palette is local to the
+ * object rather than being one global table the cat and the furniture both
+ * have to agree about.
+ * ============================================================ */
+
+/* A char grid of any rectangular size — the cat rig is fixed at 32x32, the
+ * room's objects are whatever they actually are. */
+function gridOf(w, h) {
+  return Array.from({ length: h }, () => new Array(w).fill('.'));
+}
+function toRows(G) { return G.map(r => r.join('')); }
+
+/* The yarn ball: six frames of the wind at different phases, so it rolls by
+ * cycling frames the way everything else here does rather than by being
+ * redrawn with a live phase. Sixteen wide, so the unravelled strand trailing
+ * off to the left has somewhere to live. */
+function yarnFrames() {
+  /* Twenty wide, not sixteen. The ball is 11 across and sits to the right of
+   * the frame so the unravelled strand has somewhere to lie: at 16 wide with
+   * the ball centred, there was room for two pixels of strand and what came
+   * out was a detached dash on the floor a few pixels from the ball, which
+   * looked like litter rather than wool.
+   *
+   * The strand's own slack is the point — a ball of wool that has been rolled
+   * around a room has a tail, and where it lies is most of how you know it
+   * moved. So it undulates, and the undulation carries the roll phase, which
+   * means the tail flicks as the ball turns.
+   */
+  const W = 20, H = 12, cx = 13, cy = 6, r = 5;
+  const out = {};
+  for (let f = 0; f < 6; f++) {
+    const G = gridOf(W, H);
+    const phase = (f / 6) * Math.PI * 2;
+    const put = (x, y, c) => {
+      x = Math.round(x); y = Math.round(y);
+      if (x >= 0 && x < W && y >= 0 && y < H) G[y][x] = c;
+    };
+    /* the strand: off the left of the ball, lying along the floor, slack
+     * enough to loop once. It starts *under* the ball's edge so there is no
+     * gap between the two. */
+    for (let s = 0; s <= 40; s++) {
+      const t = s / 40;
+      const x = cx - r + 1 - t * 11;
+      const y = cy + 3.4 + Math.sin(t * 5.2 + phase * 0.5) * 1.5;
+      put(x, y, 'S');
+      if (t < 0.35) put(x, y + 1, 'S');   /* two thick where it leaves the ball */
+    }
+    /* the ball: outline, body */
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+        if (d > r) continue;
+        put(x, y, d > r - 1 ? 'k' : 'Y');
+      }
+    }
+    /* three windings, their phase carrying the rotation */
+    for (let k = 0; k < 3; k++) {
+      const a0 = phase + (k * Math.PI * 2) / 3;
+      for (let s = -4; s <= 4; s++) {
+        const w = r - 1 - Math.abs(s) * 0.6;
+        if (w <= 0) continue;
+        put(cx + Math.sin(a0 + s * 0.42) * w, cy + s, 'y');
+      }
+    }
+    /* the light, from the window: upper left */
+    put(cx - 2, cy - 2, 'W');
+    put(cx - 1, cy - 3, 'W');
+    out['yarn_' + f] = toRows(G);
+  }
+  return out;
+}
+
+/* The two bowls.
+ *
+ * What they replaced was two flat concentric discs — a dark ring and a
+ * coloured one — which is the least a bowl can look like. You could not tell
+ * it was a bowl rather than a coaster, and she put her nose in it.
+ *
+ * What they are now is a rim seen slightly from above: an ellipse for the
+ * opening, with a front wall below it narrowing to a foot. The contents fill
+ * the ellipse to a level and the surface catches the window in a couple of
+ * bright pixels, so an empty bowl and a full one are different pictures and
+ * she is never visibly eating out of one she has already finished.
+ *
+ * An earlier version drew the silhouette the wrong way up — narrow at the rim
+ * and wide at the base, which is a funnel, and the cat looked like she was
+ * eating out of a traffic cone. */
+function bowlFrames() {
+  const W = 14, H = 9, out = {};
+  const CX = 7, CY = 3.5, RX = 6.4, RY = 2.2;   /* the rim opening */
+  const FOOT = 8;                               /* the last row of the wall */
+  const bowl = (fillChar, level) => {
+    const G = gridOf(W, H);
+    const put = (x, y, c) => {
+      x = Math.round(x); y = Math.round(y);
+      if (x >= 0 && x < W && y >= 0 && y < H) G[y][x] = c;
+    };
+    /* how far the bowl reaches at each row: the ellipse while it is the rim,
+     * then the wall tapering in to the foot */
+    const rimBot = CY + RY;
+    const reach = y => {
+      if (y <= rimBot) {
+        const dy = (y - CY) / RY;
+        return dy >= -1 && dy <= 1 ? RX * Math.sqrt(1 - dy * dy) : 0;
+      }
+      const t = (y - rimBot) / (FOOT - rimBot);
+      return RX * (1 - t * 0.55);
+    };
+    /* the body */
+    for (let y = Math.floor(CY - RY); y <= FOOT; y++) {
+      const hw = reach(y);
+      if (hw <= 0.4) continue;
+      /* The span is floored, not rounded, so both ends of the row are real
+       * integers and the outline test below always has something to catch.
+       * Testing against the float width instead meant rows whose fractional
+       * span fell just short got no outline at all, and the bowl had a soft
+       * fringe on its widest rows. */
+      const n = Math.floor(hw);
+      for (let x = -n; x <= n; x++) {
+        const edge = Math.abs(x) === n;
+        /* the first row below the opening is the rim's near lip: lighter
+         * than the wall under it, which is what makes it read as a lip and
+         * not as a seam */
+        const lip = y === Math.ceil(rimBot);
+        put(CX + x, y, edge ? 'k' : (lip ? 'R' : 'C'));
+      }
+    }
+    /* the contents, filling the ellipse to `level` (0 empty, 1 brimming) */
+    if (fillChar && level > 0) {
+      const surface = CY - RY + (1 - level) * (RY * 2 - 1);
+      for (let y = Math.ceil(surface); y <= Math.floor(rimBot); y++) {
+        const dy = (y - CY) / RY;
+        const inner = Math.floor(RX * Math.sqrt(Math.max(0, 1 - dy * dy))) - 1;
+        if (inner < 0) continue;
+        for (let x = -inner; x <= inner; x++) {
+          put(CX + x, y, fillChar);
+        }
+      }
+      /* the surface catches the window */
+      for (let x = -2; x <= 2; x++) put(CX + x, Math.round(surface), 'l');
+    }
+    return G;
+  };
+  /* two states each, which is all the animation a bowl needs: it is either
+   * there or it has been eaten. The surface drops as it goes, so the full
+   * frame and the empty frame are not just a fill appearing and vanishing. */
+  out.bowl_food = toRows(bowl('F', 0.85));
+  out.bowl_food_empty = toRows(bowl(null, 0));
+  out.bowl_water = toRows(bowl('W', 0.9));
+  out.bowl_water_empty = toRows(bowl(null, 0));
+  return out;
+}
+
+/* Char palettes, per object. These are the *unlit* colours: scene.js passes
+ * ambient + ambientAmt to Sprite.draw, which mixes them the same way the
+ * hand-drawn room did, so an object that becomes a sprite does not also
+ * change how the light falls on it. */
+const SCENE_PALETTES = {
+  yarn: {
+    k: '#b04468', Y: '#e79ab5', y: '#c96b8c', W: '#ffd9e6', S: '#d97f9d'
+  },
+  bowl: {
+    k: '#2b1c14', C: '#8a5c31', R: '#a06a3c', l: '#ffffff',
+    F: '#c06a2e', W: '#4a9fd8'
+  }
+};
+
+/* Everything the room draws through the sprite API, as data. */
+function sceneSprites() {
+  return {
+    yarn: { name: 'yarn', charColors: SCENE_PALETTES.yarn, frames: yarnFrames() },
+    bowl: { name: 'bowl', charColors: SCENE_PALETTES.bowl, frames: bowlFrames() }
+  };
+}
+
 /* ---------- output --------------------------------------------------- */
 
 function toAscii(rows) {
@@ -968,6 +1160,49 @@ let TAIL_MASKS = {};   /* filled in by frames() */
 
 const mode = process.argv[2] || '--preview';
 const F = frames();
+const S = sceneSprites();
+
+/* Scene-object frames get their own, much looser, checks than the cat's.
+ * The cat is 32x32 and front-facing, so it can be held to mirror symmetry and
+ * to a fixed grid. A yarn ball is 16x12 and is a ball; the only things worth
+ * asserting about it are that it is rectangular, that every character it
+ * uses has a colour (otherwise it renders magenta and nobody notices for a
+ * month), and that it is not empty. */
+function checkScene() {
+  let bad = 0;
+  for (const set of Object.keys(S)) {
+    const sprite = S[set];
+    const chars = new Set();
+    for (const name of Object.keys(sprite.frames)) {
+      const rows = sprite.frames[name];
+      const w = rows[0].length;
+      if (!w || !rows.length) { bad++; console.log('BAD scene ' + set + '/' + name + ': empty'); continue; }
+      let ink = 0;
+      for (let y = 0; y < rows.length; y++) {
+        if (rows[y].length !== w) {
+          bad++; console.log('BAD scene ' + set + '/' + name + ' row ' + y + ': ' + rows[y].length + ' cols, expected ' + w);
+          continue;
+        }
+        for (let x = 0; x < w; x++) {
+          const c = rows[y][x];
+          if (c === '.') continue;
+          ink++;
+          chars.add(c);
+          if (!sprite.charColors[c]) {
+            bad++; console.log('BAD scene ' + set + '/' + name + ": char '" + c + "' has no colour in " + set);
+          }
+        }
+      }
+      if (!ink) { bad++; console.log('BAD scene ' + set + '/' + name + ': frame is empty'); }
+    }
+    for (const c of Object.keys(sprite.charColors)) {
+      if (!chars.has(c)) {
+        console.log('note: ' + set + ' declares colour ' + c + ' that no frame uses');
+      }
+    }
+  }
+  return bad;
+}
 
 /* Mechanical verification, per view.
  *
@@ -1037,18 +1272,30 @@ function checkFrames() {
 }
 
 if (mode === '--check') {
-  process.exit(checkFrames() === 0 ? 0 : 1);
+  const bad = checkFrames();
+  const sbad = checkScene();
+  if (bad === 0 && sbad === 0) {
+    const sf = Object.values(S).reduce((n, s) => n + Object.keys(s.frames).length, 0);
+    console.log('SCENE CHECK OK — ' + sf + ' object frames in ' + Object.keys(S).length +
+      ' sprites, every char coloured');
+  }
+  process.exit(bad === 0 && sbad === 0 ? 0 : 1);
 } else if (mode === '--build') {
   const lines = [];
   lines.push('/* ============================================================');
   lines.push(' * NES-cat — frames.js');
-  lines.push(' * Literal 32x32 pixel frames for Shiro (front view).');
+  lines.push(' * Literal pixel frames: Shiro at 32x32, the room’s objects at');
+  lines.push(' * whatever size they actually are.');
   lines.push(' *');
   lines.push(' * GENERATED by tools/build-sprites.js — edit the tool, not this file.');
   lines.push(' *');
-  lines.push(' * Char legend:  . transparent   K outline   W body   H shade');
-  lines.push(' *               G deep shade    P pink      N nose   E eye');
-  lines.push(' *               B blush         M mouth');
+  lines.push(' * Char legend for Shiro:  . transparent   K outline   W body');
+  lines.push(' *               H shade        G deep shade  P pink   N nose');
+  lines.push(' *               E eye          B blush        M mouth');
+  lines.push(' *');
+  lines.push(' * The room’s objects are a second table, and a second idea: each one');
+  lines.push(' * carries its own charColors rather than sharing the cat’s, because a');
+  lines.push(' * ball of wool and a cat are made of different things.');
   lines.push(' * ============================================================ */');
   lines.push('(function (root) {');
   lines.push("  'use strict';");
@@ -1060,16 +1307,56 @@ if (mode === '--check') {
     lines.push('    ]' + (i === Object.keys(F).length - 1 ? '' : ','));
   });
   lines.push('  };');
+  lines.push('');
+  lines.push('  /* The room, as sprites: one entry per object, each with its own');
+  lines.push('   * palette. scene.js makes these with the same makeSprite() the cat');
+  lines.push('   * uses, so a frame is a hit box and a collider as well as a');  lines.push('   * picture. */');
+  lines.push('  NESCAT.sceneSprites = {');
+  Object.keys(S).forEach((set, si) => {
+    const sprite = S[set];
+    lines.push('    ' + set + ': {');
+    lines.push("      name: '" + sprite.name + "',");
+    lines.push('      charColors: {');
+    Object.keys(sprite.charColors).forEach((c, ci) => {
+      lines.push("        '" + c + "': '" + sprite.charColors[c] + "'" +
+        (ci === Object.keys(sprite.charColors).length - 1 ? '' : ','));
+    });
+    lines.push('      },');
+    lines.push('      frames: {');
+    Object.keys(sprite.frames).forEach((k, i) => {
+      lines.push('        ' + k + ': [');
+      sprite.frames[k].forEach(r => lines.push("          '" + r + "',"));
+      lines.push('        ]' + (i === Object.keys(sprite.frames).length - 1 ? '' : ','));
+    });
+    lines.push('      }');
+    lines.push('    }' + (si === Object.keys(S).length - 1 ? '' : ','));
+  });
+  lines.push('  };');
   lines.push("})(typeof window !== 'undefined' ? window : globalThis);");
   lines.push('');
   const outPath = path.join(__dirname, '..', 'NES-cat', 'js', 'frames.js');
   fs.writeFileSync(outPath, lines.join('\n'), 'utf8');
-  console.log('wrote ' + outPath + '  (' + Object.keys(F).length + ' frames)');
+  const sf = Object.values(S).reduce((n, s) => n + Object.keys(s.frames).length, 0);
+  console.log('wrote ' + outPath + '  (' + Object.keys(F).length + ' cat frames, ' +
+    sf + ' object frames)');
 } else {
+  /* --preview takes either a cat frame name or `yarn_0` / `bowl_food`, so the
+   * room's objects can be eyeballed the same way the cat can. */
   const want = process.argv.slice(2).filter(a => a.charAt(0) !== '-');
-  (want.length ? want : Object.keys(F)).forEach(k => {
-    if (!F[k]) return;
-    console.log('\n== ' + k + ' ==');
-    console.log(toAscii(F[k]));
+  const names = want.length ? want : Object.keys(F);
+  names.forEach(k => {
+    if (F[k]) {
+      console.log('\n== ' + k + ' ==');
+      console.log(toAscii(F[k]));
+      return;
+    }
+    for (const set of Object.keys(S)) {
+      if (S[set].frames[k]) {
+        console.log('\n== ' + set + '/' + k + ' ==');
+        console.log(toAscii(S[set].frames[k]));
+        return;
+      }
+    }
+    console.log('\n== ' + k + ' == (no such frame)');
   });
 }

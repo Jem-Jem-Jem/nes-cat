@@ -72,6 +72,55 @@
 
   function inWindowBand(x) { return x >= 14 && x <= 118; }
 
+  /* ---------- what is actually in the room -------------------------------
+   *
+   * One table, and everything about an object is in it: which sprite it is,
+   * which of its pixels is the anchor point, where it sits, whether the cat
+   * can walk through it, and whether you can pick it up. The draw code, the
+   * hit test and the collider all read this, so they cannot drift apart —
+   * which is the entire reason the room went through the sprite API rather
+   * than staying a pile of drawing calls.
+   *
+   * ax/ay is the frame pixel that sits on `x`/`y`. For the yarn that is its
+   * middle; for a bowl it is the top-left, because a bowl is placed by where
+   * its foot lands on the floor, not by its centre.
+   *
+   * `solid` is deliberately false for everything that is on the floor as
+   * opposed to standing in it. A cat walks past a ball of wool and a cat
+   * does not walk through the planter; but she does walk over the rug and
+   * through the gap between the two bowls, and marking those solid would
+   * fence her out of the middle of her own room.
+   */
+  var OBJECTS = {
+    yarn: {
+      sprite: 'yarn', ax: 13, ay: 6, x: 104, y: 166,
+      solid: false, grab: true, label: 'the yarn',
+      shadowW: 8            /* the ball only — the strand lies flat in the
+                              * same light and casts nothing */
+    },
+    food: {
+      sprite: 'bowl', ax: 7, ay: 0, x: 66, y: 133,
+      solid: false, grab: false, label: 'the food bowl',
+      shadowW: 14,
+      frame: function (sc) { return sc.food > 0.02 ? 'bowl_food' : 'bowl_food_empty'; }
+    },
+    water: {
+      sprite: 'bowl', ax: 7, ay: 0, x: 46, y: 130,
+      solid: false, grab: false, label: 'the water bowl',
+      shadowW: 14,
+      frame: function (sc) { return sc.water > 0.02 ? 'bowl_water' : 'bowl_water_empty'; }
+    },
+    tree: {
+      sprite: null, ax: 23, ay: 82, x: 215, y: 138,
+      solid: true, grab: false, label: 'the cat tree'
+    },
+    plant: {
+      sprite: null, ax: 11, ay: 38, x: 271, y: 140,
+      solid: true, grab: false, label: 'the plant'
+    }
+  };
+  var SOLID = Object.keys(OBJECTS).filter(function (k) { return OBJECTS[k].solid; });
+
   var Scene = {
     /* geometry other modules read */
     FLOOR_TOP: 116,      /* where the wall meets the floor */
@@ -132,6 +181,139 @@
     _yarnFrom: 104,
     _yarnTo: 118,
 
+    /* ---------- the room's objects, as sprites ---------------------------
+     *
+     * The furniture used to be 184 calls to rect/disc/pxLine. That is a
+     * picture and nothing else: nothing in a pile of drawing calls knows how
+     * big a ball of wool is, so there is no way to ask whether a click landed
+     * on one, and no way to stop a cat walking through the plant. Both of
+     * those were true — she could be dropped exactly onto the planter and the
+     * game was entirely happy about it, and the yarn was a thing that rolled
+     * about on a timer rather than a thing you could touch.
+     *
+     * As frames, the same data answers all of it at once. A frame has a width
+     * and a height, so it *is* the hit box and it *is* the collider, and the
+     * string that draws it is the thing you point at. One source, so the
+     * collision and the hit test cannot disagree with what is on screen.
+     *
+     * Built once here rather than per frame: makeSprite only validates, so
+     * there is nothing to do per frame and nothing to get wrong doing it.
+     */
+    sprites: null,
+    _buildSprites: function () {
+      var defs = NESCAT.sceneSprites || {};
+      var out = {};
+      for (var k in defs) {
+        if (Object.prototype.hasOwnProperty.call(defs, k)) {
+          out[k] = NESCAT.Sprite.makeSprite(defs[k]);
+        }
+      }
+      this.sprites = out;
+    },
+
+    /* An object's footprint on the floor. Read by the hit test and the
+     * collider alike, so there is one answer to "how big is it and where". */
+    bounds: function (obj) {
+      var d = OBJECTS[obj];
+      if (!d || !this.sprites || !this.sprites[obj]) return null;
+      var f = this.sprites[obj].frames[d.frame];
+      if (!f) return null;
+      return { x: d.x - d.ax, y: d.y - d.ay, w: f.size.w, h: f.size.h };
+    },
+
+    /* ---------- addressing the room ------------------------------------- */
+
+    /* Where an object is *now*. The yarn is the only one that moves, and it
+     * has been carrying its position in `_yarnX` all along; this is the one
+     * place that turns that into the coordinates the frame is drawn at. */
+    objectX: function (name) {
+      return name === 'yarn' ? this._yarnX : OBJECTS[name].x;
+    },
+
+    /* Which frame an object is on right now. For the bowls that is the level
+     * of what is in them, so an empty bowl is a different picture and not the
+     * same picture with the contents painted over. */
+    objectFrame: function (name) {
+      var d = OBJECTS[name];
+      if (d.frame) return d.frame(this);
+      if (name === 'yarn') {
+        /* the wind's phase is already a 0..2pi roll; cycle the six frames off
+         * it, which is what turns a rolling ball into a rolling ball rather
+         * than a sliding one */
+        return 'yarn_' + (Math.floor(this._yarnPhase / (Math.PI * 2) * 6) % 6 + 6) % 6;
+      }
+      return null;
+    },
+
+    /* An object's box on screen, or null for something not yet a sprite.
+     * The hit test, the collider and the renderer all ask this one, so "where
+     * the yarn is" has exactly one answer. */
+    box: function (name) {
+      var d = OBJECTS[name];
+      if (!d) return null;
+      var sprite = d.sprite && this.sprites ? this.sprites[d.sprite] : null;
+      var frameName = this.objectFrame(name);
+      var f = sprite && frameName ? sprite.frames[frameName] : null;
+      var w = f ? f.size.w : (d.ax * 2);
+      var h = f ? f.size.h : (d.ay * 2);
+      return { x: this.objectX(name) - d.ax, y: d.y - d.ay, w: w, h: h };
+    },
+
+    /* Which object a point is on, or null. Later entries win, so a thing that
+     * overlaps another is reachable in front of it. */
+    objectAt: function (px, py) {
+      for (var i = 0; i < Object.keys(OBJECTS).length; i++) {
+        var name = Object.keys(OBJECTS)[i];
+        var b = this.box(name);
+        if (!b) continue;
+        if (px >= b.x && px < b.x + b.w && py >= b.y && py < b.y + b.h) return name;
+      }
+      return null;
+    },
+
+    /* Collision.
+     *
+     * Before this, nothing in the piece had any: she could be dropped exactly
+     * onto the planter at x=271 and the game reported no problem, because the
+     * only thing constraining her was the room's walls. Walking a cat through
+     * a plant is the kind of thing that reads as broken no matter how
+     * charming everything else is.
+     *
+     * Only the two things that stand *in* the floor stop her. The rug is not
+     * solid and neither is a bowl — she steps over a rug, and she has to be
+     * able to get to the bowls. Fencing off everything the room contains
+     * would leave her a corridor.
+     *
+     * Shallow rather than resolved: she is pushed back to the nearest edge
+     * she is not inside, and that is the whole behaviour. A cat does not
+     * slide along obstacles; she picks a path that goes round, and her
+     * wandering targets already avoid the furniture (see treeNearX), so this
+     * only has to catch the cases where she is *placed* somewhere silly. */
+    solids: function () {
+      var out = [];
+      for (var i = 0; i < SOLID.length; i++) {
+        var b = this.box(SOLID[i]);
+        if (b) out.push({ name: SOLID[i], x: b.x, y: b.y, w: b.w, h: b.h });
+      }
+      return out;
+    },
+
+    /* Push an x out of anything solid she is standing in. Her body is 32
+     * wide; the box is what she would be standing inside. Returns the
+     * corrected x. */
+    avoidSolids: function (x, halfW) {
+      var list = this.solids();
+      for (var i = 0; i < list.length; i++) {
+        var s = list[i];
+        if (x + halfW <= s.x || x >= s.x + s.w) continue;
+        /* inside horizontally — pick the nearer edge to fall out of */
+        var left = s.x - halfW;
+        var right = s.x + s.w;
+        x = (x - left <= right - x) ? left : right;
+      }
+      return U.clamp(x, this.WALK_MIN_X, this.WALK_MAX_X);
+    },
+
     /* ---------- reactions to Shiro ---------------------------------------- */
 
     /* Shiro swatted the hanging toy: kick it and let it damp out. */
@@ -178,6 +360,8 @@
       this.second = d.getSeconds();
       this.light = NESCAT.palette.at(this.hour);
       this.isNight = this.light.isNight;
+
+      this._buildSprites();
 
       this._motes = [];
       for (var i = 0; i < 26; i++) {
@@ -842,33 +1026,70 @@
 
     drawBowls: function (g, L) {
       /* Both bowls empty as Shiro uses them, so she is never eating a
-       * bowl that is visibly already empty. */
-      var lvl = U.clamp(this.water, 0, 1);
-      var wx = this.BOWL_WATER_X, wy = 134;
-      disc(g, wx, wy, 8, 4, g.color(U.mixHex(L.floor, '#000000', 0.35)));
-      disc(g, wx, wy - 1, 7, 3, g.color(amb(L, '#3aa0d8', 0.5)));
-      if (lvl > 0.02) {
-        /* the surface sits lower as the bowl drains */
-        var sy = wy - 1 + Math.round((1 - lvl) * 2);
-        fillC(g, amb(L, '#7fc8f5', 0.45));
-        g.rect(wx - 5, sy, 10, 3);
-        fillC(g, Math.sin(this.time * 3) > 0 ? '#bfe8ff' : '#7fc8f5');
-        g.rect(wx - 3 + (Math.sin(this.time * 3) > 0 ? 1 : 0), sy, 3, 1);
-      }
+       * bowl that is visibly already empty. That used to be two concentric
+       * discs — a dark ring and a coloured one — which is the least a bowl
+       * can look like: you could not tell it from a coaster, and she put her
+       * nose in it. It is a frame now, with a rim seen slightly from above
+       * and a wall below it, so the inside of an empty one reads as inside.
+       *
+       * The level test is the same one the hand-drawn version used; all that
+       * changed is that a full bowl and an empty one are now different
+       * pictures rather than the same picture with a rectangle painted on it.
+       */
+      this.drawShadow(g, L, 'food');
+      this.drawObject(g, L, 'food', 0.5);
+      this.drawShadow(g, L, 'water');
+      this.drawObject(g, L, 'water', 0.5);
+    },
 
-      /* food bowl */
-      var flvl = U.clamp(this.food, 0, 1);
-      var fx = this.BOWL_FOOD_X, fy = 137;
-      disc(g, fx, fy, 8, 4, g.color(U.mixHex(L.floor, '#000000', 0.35)));
-      disc(g, fx, fy - 1, 7, 3, g.color(amb(L, '#e76e55', 0.5)));
-      if (flvl > 0.02) {
-        fillC(g, amb(L, '#a9743f', 0.6));
-        g.rect(fx - 5, fy - 2, 10, 3);
-        fillC(g, amb(L, '#c98a4a', 0.6));
-        g.rect(fx - 4, fy - 3, 2, 2);
-        g.rect(fx, fy - 3, 2, 2);
-        g.rect(fx + 3, fy - 2, 2, 2);
-      }
+    /* One object, through the sprite API, lit the way the room lights
+     * everything else. The `k` is the same ambient weight amb() used, so an
+     * object becoming a sprite did not also change how the light falls on it.
+     *
+     * Two things every sprite needs and the frame gives for free: the run
+     * merging in Sprite.draw, so a 16x12 ball costs a handful of rects rather
+     * than 192, and the transparency — '.' is not drawn at all, which is why
+     * the strand can trail off the edge of the frame without a box around it.
+     */
+    drawObject: function (g, L, name, k) {
+      var d = OBJECTS[name];
+      if (!d || !d.sprite || !this.sprites) return;
+      var sprite = this.sprites[d.sprite];
+      var frame = this.objectFrame(name);
+      if (!frame || !sprite.frames[frame]) return;
+      NESCAT.Sprite.draw(g, sprite, frame,
+        this.objectX(name) - d.ax, d.y - d.ay,
+        { ambient: L.ambient, ambientAmt: L.ambientAmt * (k == null ? 0.6 : k) });
+    },
+
+    /* The contact shadow under something standing on the floor.
+     *
+     * Deliberately *not* part of the frame. A shadow is the floor's colour
+     * darkened, so it has to be tinted by the floor and not by the light —
+     * put it in the sprite and it would take the object's own ambient and sit
+     * on the rug at a different temperature from the rug.
+     *
+     * Sized from the frame's footprint rather than hardcoded, which is the
+     * other half of why the room went through the sprite API: the shadow is
+     * the right width because the bowl is.
+     */
+    drawShadow: function (g, L, name) {
+      var b = this.box(name);
+      var d = OBJECTS[name];
+      if (!b || !d) return;
+      var cx = b.x + d.ax;
+      var footY = b.y + b.h;
+      /* The shadow is its own size, not the frame's. The yarn's frame is 20
+       * wide because it has a strand trailing off one side, and a shadow
+       * derived from that came out nearly twice the ball — a dark bar on the
+       * rug the length of a tail that is lying flat in the same light. What
+       * actually meets the floor is narrower than its frame, and only the
+       * object knows by how much. */
+      var hw = d.shadowW || Math.round(b.w * 0.5);
+      disc(g, Math.round(cx), Math.round(footY), Math.round(hw * 0.5), 2,
+        g.color(U.mixHex(L.floor, '#000000', 0.26)));
+      disc(g, Math.round(cx) - 1, Math.round(footY), Math.round(hw * 0.32), 1,
+        g.color(U.mixHex(L.floor, '#000000', 0.18)));
     },
 
     /* ---------- cat tree ---------------------------------------------------- */
@@ -1007,28 +1228,19 @@
     /* ---------- yarn -------------------------------------------------------- */
 
     drawYarn: function (g, L) {
-      var x = this._yarnX, y = 166;
-
-      /* the strand it has unraveled */
-      fillC(g, amb(L, '#e79ab5', 0.5));
-      pxLine(g, x - 16, y + 6, x - 8, y + 3);
-      pxLine(g, x - 8, y + 3, x - 2, y + 6);
-
-      disc(g, x, y, 6, 6, g.color(amb(L, C.pink, 0.5)));
-
-      /* winding stripes; their phase rolls as the ball turns */
-      fillC(g, amb(L, '#ea7d9e', 0.5));
-      for (var k = 0; k < 3; k++) {
-        var a0 = this._yarnPhase + k * 2.1;
-        for (var s = -5; s <= 5; s++) {
-          var w = 36 - s * s;
-          if (w <= 0) continue;
-          var xx = x + Math.sin(a0 + s * 0.45) * Math.sqrt(w) * 0.55;
-          g.rect(Math.round(xx), Math.round(y + s), 1, 1);
-        }
-      }
-      fillC(g, amb(L, '#ffd9e6', 0.5));
-      g.rect(Math.round(x) - 2, Math.round(y) - 3, 2, 1);
+      /* Six frames of the wind at different phases, cycled off the rolling
+       * phase. It was a live trigonometric redraw before — three winding arcs
+       * computed every frame, and the phase coming from wherever the rolling
+       * animation had got to. Six frames off the same phase is the same
+       * motion, and it means the ball's size is data rather than the radius of
+       * a disc() call that nothing else in the room can see.
+       *
+       * The unravelled strand is part of the frame, which is why it still
+       * trails off to the left of the ball and reads as one object rather
+       * than a ball with a line drawn near it.
+       */
+      this.drawShadow(g, L, 'yarn');
+      this.drawObject(g, L, 'yarn', 0.5);
     },
 
     /* ---------- dust --------------------------------------------------------- */
