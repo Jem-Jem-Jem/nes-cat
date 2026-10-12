@@ -642,6 +642,25 @@ function frames() {
   pose('loaf_0', Object.assign({}, loafA));
   pose('loaf_1', Object.assign({}, loafA, { squash: 3.0, headDY: 3.9, pawLift: 1.9 }));
 
+  /* --- nod: sitting up and nodding off.
+   *
+   * The thing that makes a cat do this is that she is losing a fight with
+   * sleep while sitting, and the fight is the whole animation: the head goes
+   * down, comes back up, goes down further, and eventually does not come back
+   * up. A single "sleepy" pose would be a cat falling asleep, which is what
+   * `sleep` already is; this is the bit before it, and it is the bit a viewer
+   * recognises instantly.
+   *
+   * mergeHead throughout — a head hanging forward has no neck, and without it
+   * the drooping frames draw a full circle round the skull sitting on the
+   * shoulders, which is a cat looking down rather than a cat going to sleep. */
+  const nodA = Object.assign({}, sitBase, { bodyDY: 0.4, tailUp: 0.3, mergeHead: true });
+  pose('nod_1', Object.assign({}, nodA, { eyes: 'closed', headDY: 2.8, earPerk: -1.0 }));
+  pose('nod_2', Object.assign({}, nodA, { eyes: 'closed', headDY: 4.4, earPerk: -1.4, squash: 1.3 }));
+  /* the snap back: eyes wide, ears up, head high. This is the frame that
+   * makes the droop read as a droop and not as a pose she chose. */
+  pose('nod_3', Object.assign({}, sitBase, { eyes: 'wide', headDY: -0.6, earPerk: 1.0, tailUp: 0.5 }));
+
   /* --- shake: the full-body shudder she does the instant she is put down.
    *
    * headDX swings the whole skull side to side — the ears and face travel

@@ -571,6 +571,31 @@
         }
       },
 
+      /* nod: sitting up and losing a fight with sleep.
+       *
+       * The droop comes back up, then goes down further, and eventually does
+       * not come back up — and the fight is the whole animation. A single
+       * "sleepy" pose would just be a cat falling asleep, which is what
+       * `sleep` already is; this is the bit before it, and it is the bit
+       * anyone who has watched a cat recognises instantly.
+       *
+       * Front view, and it has to be: she is sitting facing you, doing
+       * nothing, and the only thing that changes is her head. Gated on how
+       * awake she is, so it happens in the evening and not at noon, and it
+       * hands straight to `sleep` — which is the point, because `sleep`
+       * decides its own length on entry from whether it is night. */
+      nod: {
+        enter: function () {
+          self._act = { dur: B.nodDur };
+          if (self.onSay && U.chance(0.6)) self.onSay('sleepy');
+        },
+        update: function (dt, s) {
+          if (s.time > self._act.dur) { self._sm.set('sleep'); return; }
+          self._bob += dt * B.bobSpeed * 0.5;
+          if (self.petting) { self.wake(); return; }
+        }
+      },
+
       /* shake: the shudder she does the instant she is put down. It is the
        * natural end of being carried — without it she simply stops hanging
        * and the release reads as a sprite swap rather than a cat landing. */
@@ -811,6 +836,10 @@
       else pool.push(['loaf', B.wLoaf]);
     }
     pool.push(['knead', B.wKnead]);
+    /* Sitting up and nodding off. Offered only once she is actually losing
+     * the fight, so it reads as the run-up to a nap rather than as a pose
+     * she happens to strike. */
+    if (this._awake < 0.55) pool.push(['nod', B.wNod]);
     /* Something caught her ear. A cat that has just woken is not interested
      * in what it heard, and neither is one that has been up all night, so
      * this is offered by how awake she is rather than by a flat weight. */
@@ -1341,6 +1370,27 @@
     /* loaf: just breathing, until she decides to unfold */
     if (st === 'loaf') {
       return (Math.sin(t * 1.7) > 0) ? 'loaf_0' : 'loaf_1';
+    }
+
+    /* nod: a droop, a recover, and then one that does not recover.
+     *
+     * The recover is the load-bearing frame — without it the droop is just a
+     * pose she is holding — and the last beat before she goes down is pinned
+     * to the bottom of the droop instead of coming back up, so the sequence
+     * ends by admitting defeat rather than by cutting. */
+    if (st === 'nod') {
+      var lead = 0.4;
+      if (t < lead) return 'sit_closed';
+      var beat = Bh.nodBeat;
+      /* the last full beat, held at the bottom rather than coming back up */
+      var last = (Math.floor((Bh.nodDur - lead) / beat) - 1) * beat + lead;
+      if (t >= last) return 'nod_2';
+      /* the phase is measured from the end of the lead, not from zero, or
+       * the first cycle starts part-way through and skips its opening droop */
+      var ph = ((t - lead) % beat) / beat;
+      if (ph < 0.32) return 'nod_1';
+      if (ph < 0.60) return 'nod_2';
+      return 'nod_3';
     }
 
     /* shake: a fast alternating shudder, then a settle */

@@ -168,15 +168,30 @@ turn. Going through `sm.set()` would rebuild it and send her back to the start
 of the approach, so she would pivot forever.
 
 **Stationary.** `idle` (breathing, blinking, cursor gaze, plus the
-flourishes), `sit`, `sleep`, `react`, and two whole postures that are not
-flourish overlays: `stretch` (spine uncoiling, hold, release) and `loaf`
-(tucked into a compact oval). `knead` and `alert` are in the same family.
+flourishes), `sit`, `sleep`, `react`, and whole postures that are not
+flourish overlays: `stretch` (rump up, forelegs slid forward, hold, release),
+`loaf` (tucked into a single mound) and `knead` (a forepaw pressing into a
+blanket). `alert` is in the same family. `loaf` and `sleep` are front view and
+one shape with no neck; `stretch` and `knead` are profile, because a spine
+uncoiling and a leg doing work are exactly the two things a front view cannot
+show.
+
+**Settling.** `circle` is a code animation with no new art: she tramples a
+spot, turning on it in profile, and half of all loaves arrive through it. A
+cat chooses a place rather than arriving at one, and the trampling is why.
 
 **Travelling.** `walk` is a six-frame cycle driven by *distance travelled*
 rather than a clock, so the paws never skate. `jump` and `pounce` carry a
 vertical arc while the shadow stays on the floor and shrinks.
 
-**Reaching.** `eat`, `drink`, `groom`, `wash`, `tree` and `watch` — the
+**The hunt.** `stalk` creeps her toward the yarn — low, slow, tail lashing,
+which is the tell — and holds a coil before she springs. `pounce` is the
+launch. `chase` reuses the walk cycle on a shorter stride, which at 32px is
+the whole difference between walking and running, and follows the yarn
+wherever it rolled. Bounded at `chaseMax` rounds, because a cat that chases a
+ball of wool forever is not a cat.
+
+**Reaching.** `eat`, `drink`, `groom`, `wash`, `tree` and `scratch` — the
 states where what matters is her body bending or reaching toward something.
 `watch` is the turn as an activity in its own right: she turns to profile,
 stands there breathing, and turns back.
