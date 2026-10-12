@@ -656,21 +656,33 @@
         }
       },
 
-      /* alert: something caught her ear. Snaps her head up, holds, then
-       * settles — attention, not alarm, since the mouth stays a smile.
+      /* alert_snap: the startle — head snaps up, mouth opens, ears go up.
+       * alert_0 is the whole point; this state exists so the snap has its
+       * own beat rather than being the first phase of a longer state.
        *
        * Which thing caught her decides what she says about it, so a startle
        * while a bird is going past the window comes out as "bird!" rather
        * than as a question about a noise the room does not have. */
-      alert: {
+      alert_snap: {
         enter: function () {
-          self._act = { dur: B.alertDur };
+          self._act = { dur: B.alertSnapDur };
           if (!self.onSay) return;
           if (NESCAT.Scene.birdSighting > 0) {
             if (U.chance(0.7)) self.onSay('bird');
           } else if (U.chance(0.5)) {
             self.onSay('alert');
           }
+        },
+        update: function (dt, s) {
+          if (s.time > self._act.dur) sm.set('alert_hold');
+        }
+      },
+
+      /* alert_hold: sustained attention — holding the alert pose, slightly
+       * relaxed. Exits to idle when done. */
+      alert_hold: {
+        enter: function () {
+          self._act = { dur: B.alertDur };
         },
         update: function (dt, s) {
           if (s.time > self._act.dur) sm.set('idle');
@@ -949,7 +961,7 @@
      * being scenery she happens to be standing near. */
     if (Sc.birdSighting > 0) {
       pool.push(['watch', B.wWatch * 3]);
-      pool.push(['alert', B.wAlert * 2]);
+      pool.push(['alert_snap', B.wAlert * 2]);
     } else {
       pool.push(['watch', B.wWatch]);
     }
@@ -972,7 +984,7 @@
     /* Something caught her ear. A cat that has just woken is not interested
      * in what it heard, and neither is one that has been up all night, so
      * this is offered by how awake she is rather than by a flat weight. */
-    if (this._awake > 0.6) pool.push(['alert', B.wAlert]);
+    if (this._awake > 0.6) pool.push(['alert_snap', B.wAlert]);
     if (this._awake > 0.3) pool.push(['wash', B.wWash]);
     if (this._sinceWater > B.drinkGap && Sc.water > 0.05) pool.push(['drink', 22]);
     else if (Sc.water > 0.05) pool.push(['drink', 8]);
@@ -1638,13 +1650,11 @@
       return 'shake_2';
     }
 
-    /* alert: snap up, hold, ease back down */
-    if (st === 'alert') {
-      var ap = t / Bh.alertDur;
-      if (ap < 0.25) return 'alert_0';
-      if (ap < 0.7) return 'alert_1';
-      return 'idle_open';
-    }
+    /* alert_snap: the startle — always alert_0 */
+    if (st === 'alert_snap') return 'alert_0';
+
+    /* alert_hold: sustained attention — always alert_1 */
+    if (st === 'alert_hold') return 'alert_1';
 
     /* knead: two poses, alternating fast — a phase offset reads as a paw
        * pressing into the blanket rather than a two-frame loop */

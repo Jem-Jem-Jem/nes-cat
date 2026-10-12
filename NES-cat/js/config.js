@@ -188,6 +188,7 @@
       /* the rest of the idle repertoire */
       shakeDur: 0.52,     /* the shudder on landing after being carried */
       alertDur: 1.15,
+      alertSnapDur: 0.4,
       kneadDur: 4.2,
       /* nod: sitting up and losing a fight with sleep. The droop-and-recover
        * beats, and how long she sits there before the last one does not come
