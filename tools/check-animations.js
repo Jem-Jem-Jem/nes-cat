@@ -48,7 +48,7 @@ function loadShiro() {
   const calls = [];
   const Scene = {
     FLOOR_TOP: 116, FEET_Y: 142, WALK_MIN_X: 18, WALK_MAX_X: 268,
-    BOWL_WATER_X: 46, BOWL_FOOD_X: 66, CAT_TREE_X: 214,
+    BOWL_WATER_X: 46, BOWL_FOOD_X: 66, BOWL_GAP: 27, CAT_TREE_X: 214,
     YARN_MIN_X: 92, YARN_MAX_X: 138,
     light: { ambient: '#8899aa', ambientAmt: 0, isNight: false },
     hour: 12, second: 0, time: 0, isNight: false,

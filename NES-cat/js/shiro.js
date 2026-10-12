@@ -189,7 +189,7 @@
       eat: {
         enter: function (sm, from) {
           self.beginActivity(sm, from,
-            { target: NESCAT.Scene.BOWL_FOOD_X - 18, dur: B.eatDur, phase: 0 });
+            { target: NESCAT.Scene.BOWL_FOOD_X - NESCAT.Scene.BOWL_GAP, dur: B.eatDur, phase: 0 });
         },
         update: function (dt, s) {
           if (!self.arrive(dt, self._act.target)) return;
@@ -208,7 +208,7 @@
       drink: {
         enter: function (sm, from) {
           self.beginActivity(sm, from,
-            { target: NESCAT.Scene.BOWL_WATER_X - 18, dur: B.drinkDur, phase: 0 });
+            { target: NESCAT.Scene.BOWL_WATER_X - NESCAT.Scene.BOWL_GAP, dur: B.drinkDur, phase: 0 });
         },
         update: function (dt, s) {
           if (!self.arrive(dt, self._act.target)) return;
@@ -356,14 +356,27 @@
       /* ---------- idle variety ------------------------------------------
        * Flourishes are overlays on one pose. These are whole different
        * postures she settles into while awake and still, which is what
-       * stops "idle" from looking like a single loop. Both are front view —
-       * she is facing you and staying there. */
+       * stops "idle" from looking like a single loop.
+       *
+       * loaf is front view: she is facing you and staying there, and a loaf
+       * is a single mound with nothing in it worth seeing from the side.
+       * stretch is NOT — see below. */
 
-      /* the long stretch: spine uncoiling, rump up, then easing back */
+      /* The long stretch: rump up, forelegs slid forward, then easing back.
+       *
+       * This moved to profile, and it is the clearest case for the rule the
+       * whole two-view system rests on. The shape of a stretch *is* a spine
+       * uncoiling, and a spine is exactly what a front-on view cannot show:
+       * authored front it was a head circle on a body circle with her head
+       * up, which is a sit. It is now an activity like any other profile
+       * state, so it pivots in on beginActivity and turns back out on
+       * endActivity — the same two calls every bowl and jump uses. */
       stretch: {
         enter: function (sm, from, payload) {
           var p = payload || {};
-          self._act = { dur: B.stretchDur };
+          /* no target: she stretches where she stands, and arrive() treats a
+           * null target as "already there" */
+          self.beginActivity(sm, from, { target: null, dur: B.stretchDur });
           /* waking stretches, and then says something about it */
           if (p.fromSleep) {
             if (self.onSay) self.onSay('wake');
@@ -372,7 +385,8 @@
           }
         },
         update: function (dt, s) {
-          if (s.time > self._act.dur) sm.set('idle');
+          if (!self.arrive(dt, self._act.target)) return;
+          if (s.time > self._act.dur) self.endActivity();
         }
       },
 
@@ -411,16 +425,21 @@
         }
       },
 
-      /* knead: working a blanket. Both paws ride one lift, so the
-       * alternation is a phase offset in frameFor rather than two frames
-       * that are almost identical. */
+      /* knead: working a blanket, one forepaw pressing and drawing back.
+       *
+       * Profile, like the stretch and for the same reason: a paw pressing
+       * into something is a leg doing work, and the front rig has no legs —
+       * two paw ellipses merged into the torso, which cannot be seen to
+       * press. The alternation is a phase offset in frameFor rather than two
+       * frames that are almost identical. */
       knead: {
-        enter: function () {
-          self._act = { dur: B.kneadDur };
+        enter: function (sm, from) {
+          self.beginActivity(sm, from, { target: null, dur: B.kneadDur });
           if (self.onSay && U.chance(0.35)) self.onSay('happy');
         },
         update: function (dt, s) {
-          if (s.time > self._act.dur) sm.set('idle');
+          if (!self.arrive(dt, self._act.target)) return;
+          if (s.time > self._act.dur) self.endActivity();
         }
       }
     };
@@ -924,7 +943,7 @@
   Shiro.SIDE_STATES = {
     walk: 1, jump: 1, pounce: 1,
     eat: 1, drink: 1, groom: 1, wash: 1, tree: 1,
-    turn: 1, watch: 1
+    turn: 1, watch: 1, stretch: 1, knead: 1
   };
 
   /* Two different questions about the view, and they are not interchangeable:
@@ -1061,9 +1080,11 @@
        * beat — the pose itself is the point, not the motion into it. */
     if (st === 'stretch') {
       var d = Bh.stretchDur;
-      if (t < d * 0.30) return 'stretch_0';
-      if (t < d * 0.68) return 'stretch_1';
-      if (t < d) return 'stretch_2';
+      if (t < d * 0.30) return 'side_stretch_0';
+      if (t < d * 0.68) return 'side_stretch_1';
+      /* the last third is a release, and the state turns her back to face
+       * the room over it — so there is no fourth frame to fall through to */
+      return 'side_stretch_2';
     }
 
     /* loaf: just breathing, until she decides to unfold */
@@ -1089,10 +1110,10 @@
       return 'idle_open';
     }
 
-    /* knead: two poses, alternating fast — a phase offset reads as paws
-       * working rather than a two-frame loop */
+    /* knead: two poses, alternating fast — a phase offset reads as a paw
+       * pressing into the blanket rather than a two-frame loop */
     if (st === 'knead') {
-      return (Math.sin(t * 7.5) > 0) ? 'knead_0' : 'knead_1';
+      return (Math.sin(t * 7.5) > 0) ? 'side_knead_0' : 'side_knead_1';
     }
 
     var breathing = Math.sin(this._bob) > 0.55;

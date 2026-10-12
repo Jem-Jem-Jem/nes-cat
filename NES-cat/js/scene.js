@@ -84,6 +84,11 @@
      * a bowl here and she turns up at the new spot automatically. */
     BOWL_WATER_X: 46,
     BOWL_FOOD_X: 66,
+    /* How far left of a bowl she stands to use it. The profile muzzle sits
+     * about 27px into a 32px sprite, so anything less and she reaches past
+     * the bowl instead of into it — which is what an 18px stand-off did,
+     * leaving her head ten pixels beyond the food with nothing under it. */
+    BOWL_GAP: 27,
     CAT_TREE_X: 214,     /* she stands just left of the post */
     YARN_MIN_X: 92,
     YARN_MAX_X: 138,

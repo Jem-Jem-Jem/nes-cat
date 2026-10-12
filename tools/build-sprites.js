@@ -51,9 +51,16 @@ function maskOr(...ms) {
   }
   return m;
 }
-/* A leg: a short vertical capsule from `topY` down to `footY`. Side view. */
+/* A leg: a short vertical capsule from `topY` down to `footY`. Side view.
+ *
+ * The height is the *absolute* distance, not topY-footY. A raised leg has its
+ * foot above the hip, so the signed difference goes negative and the old
+ * Math.max(0.5, ...) collapsed every lifted leg to a one-pixel nub — the paw
+ * vanished into the belly for grooming, washing, kneading and holding alike,
+ * and no amount of raising it changed anything. The 0.5 floor is still wanted
+ * for a leg with no length at all, so it stays, on the magnitude. */
 function maskLeg(x, topY, footY, w) {
-  const cy = (topY + footY) / 2, ry = Math.max(0.5, (footY - topY) / 2);
+  const cy = (topY + footY) / 2, ry = Math.max(0.5, Math.abs(footY - topY) / 2);
   return maskEllipse(x, cy, w / 2, ry);
 }
 function maskEllipse(cx, cy, rx, ry) {
@@ -232,6 +239,24 @@ function buildCatParts(o) {
   const headDX = o.headDX || 0;
   const headMask = maskEllipse(cx + headDX, 10.5 + o.headDY, 8.4, 6.5 - o.squash * 0.3);
   paint(G, headMask, 'W', 'K');
+
+  /* mergeHead: drop the head's outline wherever it crosses the torso.
+   *
+   * paint() outlines any pixel on the edge of its own mask, so a head sunk
+   * into the shoulders still draws a full circle round itself and the
+   * silhouette reads as two shapes resting on each other — a chin sitting on
+   * a body, with a dark line across where the neck would be. A loaf is one
+   * mound, and a sleeping cat is one mound, so for those the head has to
+   * flow into the torso rather than sit on it. Only pixels that are inside
+   * *both* masks are affected, so the outer silhouette keeps its outline and
+   * only the internal seam is removed. */
+  if (o.mergeHead) {
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (headMask[y][x] && bodyAll[y][x] && G[y][x] === 'K') G[y][x] = 'W';
+      }
+    }
+  }
 
   /* ears (drawn on top so their outline reads). They must travel with the
    head: headDY can push the skull right down to a bowl, and ears left at
@@ -451,6 +476,20 @@ function buildSideParts(o) {
   faceSide(G, hx, hy, o, pxIn);
   shadeBelow(G, headAll, hx, hy + 1.2, 'H');
 
+  /* A forepaw lifted past the shoulder is the subject of the pose — it is
+   * grooming, washing, working a blanket — so it draws *over* the head. Near
+   * legs are painted before the head so a leg passing behind the chest reads
+   * as behind; a leg raised up in front of the cheek is in front of it, and
+   * without this the muzzle simply paints over the paw and the pose is just
+   * a cat with its head down. */
+  const nearFront = legOf('nearFront');
+  if (!nearFront.hide && (nearFront.lift || 0) > 4) {
+    paint(G, legsOf(['nearFront']), 'W', 'K');
+    /* the paw itself, so the tip of a raised leg is not a bare outline */
+    shadeBelow(G, legsOf(['nearFront']), nearFront.x + o.bodyX,
+               (legTop + FLOOR - 1 - (nearFront.lift || 0)) / 2, 'H');
+  }
+
   /* paw pads on the two near feet, only where the paw is on the ground.
      * Clamped to the floor row: these are stamped directly rather than
      * masked, so a hanging leg (carried) would otherwise print a pad on the
@@ -571,29 +610,39 @@ function frames() {
   pose('sit_closed_tailUp0', Object.assign({ eyes: 'closed' }, sitBase, tailUp0));
   pose('sit_closed_tailUp1', Object.assign({ eyes: 'closed' }, sitBase, tailUp1));
 
-  /* --- sleep --- */
-  pose('sleep_0', { eyes: 'closed', sleep: true, bodyDY: 1, headDY: 2, squash: 1.0, earPerk: -0.5 });
-  pose('sleep_1', { eyes: 'closed', sleep: true, bodyDY: 1, headDY: 1.5, squash: 1.4, earPerk: -0.5 });
+  /* --- sleep: one mound, the same way a loaf is. A sleeping cat has no
+   * neck either, so the head flows into the shoulders rather than sitting on
+   * them, and the ears lie flat rather than standing. --- */
+  const sleepA = {
+    eyes: 'closed', sleep: true, bodyDY: 1, squash: 1.2, mergeHead: true,
+    earPerk: -2.2
+  };
+  pose('sleep_0', Object.assign({}, sleepA, { headDY: 2.4 }));
+  pose('sleep_1', Object.assign({}, sleepA, { headDY: 2.0, squash: 1.7 }));
 
   /* --- react (petted / played with) --- */
   pose('react_0', { eyes: 'happy', earPerk: 1, bodyDY: -1, squash: -0.4 });
   pose('react_1', { eyes: 'open', earPerk: 1, squash: 0 });
 
-  /* --- stretch: the long cat stretch, rump up and front paws forward. The
-   * torso goes wide and low and the head lifts, which is what reads as a
-   * spine uncoiling rather than a squash. --- */
-  const stretchA = { bodyRX: 9.7, squash: -0.9, headDY: -2.2, tailUp: 0.9, earPerk: -0.4, eyes: 'closed' };
-  pose('stretch_0', Object.assign({}, stretchA));
-  pose('stretch_1', Object.assign({}, stretchA, { bodyRX: 9.9, squash: -0.5, headDY: -1.7 }));
-  pose('stretch_2', Object.assign({}, stretchA, { bodyRX: 8.9, squash: 0.3, headDY: -0.7, tailUp: 0.4 }));
+  /* --- stretch: the long cat stretch, rump up and front paws slid forward.
+   * Authored here, in profile — see the side section below for why this pose
+   * is the clearest case for the whole two-view rule. --- */
 
   /* --- loaf: settling into a compact oval with her head down on her paws,
-   * the way a cat conserves heat. The opposite of the stretch. --- */
-  const loafA = { bodyRX: 9.3, squash: 1.9, headDY: 2.3, tailUp: 0.6, earPerk: -0.5, eyes: 'closed' };
+   * the way a cat conserves heat. --- */
+  /* A loaf has to read as ONE mound. The failure mode is a head circle
+   * sitting on a body circle with a visible neck between them, which is just
+   * a sit and carries none of the meaning. So the head goes down far enough
+   * to overlap the shoulders, the ears flatten and sweep back so they stop
+   * breaking the outline, and the torso swells to close the gap. */
+  const loafA = {
+    bodyRX: 9.4, squash: 2.6, headDY: 3.6, headDX: 0, mergeHead: true,
+    tailUp: 0.45, earPerk: -3.0, eyes: 'closed', pawLift: 1.6
+  };
   pose('loaf_0', Object.assign({}, loafA));
-  pose('loaf_1', Object.assign({}, loafA, { squash: 2.2, headDY: 2.5 }));
+  pose('loaf_1', Object.assign({}, loafA, { squash: 3.0, headDY: 3.9, pawLift: 1.9 }));
 
-  /* --- shake: the full-body shudder she does the instant she is put down.
+  /* --- knead: working a blanket with her forepaws, head down watching.
    * headDX swings the whole skull side to side — the ears and face travel
    * with it, which is what makes it read as a shake rather than a glance. --- */
   pose('shake_0', { eyes: 'closed', earPerk: 1.4, headDX: -1.6, headDY: 0.5, tailUp: 0.5 });
@@ -605,16 +654,11 @@ function frames() {
   pose('alert_0', { eyes: 'wide', earPerk: 1.3, headDY: -1.6, tailUp: 0.6, mouth: 'pant' });
   pose('alert_1', { eyes: 'open', earPerk: 1.1, headDY: -1.2, tailUp: 0.4 });
 
-  /* --- knead: working a blanket with her forepaws, head down watching.
-   * Both paws ride the same lift, so the alternation lives in the runtime
-   * rather than in two near-identical frames. --- */
-  const kneadA = { eyes: 'closed', earPerk: -0.3, headDY: 1.4, tailUp: 0.5 };
-  pose('knead_0', Object.assign({}, kneadA, { pawLift: 2.5 }));
-  pose('knead_1', Object.assign({}, kneadA, { pawLift: 4.0, headDY: 1.0 }));
+  /* --- knead: working a blanket with her forepaws. --- */
 
   /* --- settling into sleep: curling down over the sleep pose rather than
    * snapping into it. --- */
-  pose('sleep_settle', { eyes: 'closed', sleep: true, bodyDY: 0.5, headDY: 1.0, squash: 0.6, earPerk: -0.4 });
+  pose('sleep_settle', { eyes: 'closed', sleep: true, bodyDY: 0.5, headDY: 1.4, squash: 0.6, earPerk: -1.6, mergeHead: true });
 
   /* Everything below this line moved to the profile rig: held, jump, eat,
    * drink, groom, wash, pounce and tree are all poses where what matters is
@@ -642,6 +686,38 @@ function frames() {
   for (let i = 0; i < 6; i++) {
     side('walk_' + i, Object.assign({ eyes: 'open' }, sideWalkPose(i)));
   }
+
+  /* stretch: the long cat stretch, rump up and front paws slid forward.
+   *
+   * This is the clearest case for the rule the whole two-view system rests
+   * on. The shape of a stretch *is* a spine uncoiling — a rear quarter
+   * raised, a back dipped, forelegs reached out ahead of the chest — and a
+   * spine is exactly what a front-on view cannot show. Authored front it was
+   * a head circle on a body circle with her head up: correct pixels, and no
+   * pose in them at all.
+   *
+   * In profile the same idea is mostly rig parameters: raise the torso, drop
+   * the head toward the floor, slide the front legs forward while the rear
+   * stay planted, and lift the tail. The rump reads as high because the
+   * body is both raised and flattened (bodyY up, bodyRY down), which
+   * lengthens the back into a slope rather than a hump. */
+  const stretchA = {
+    eyes: 'closed', earPerk: -0.8,
+    bodyY: -1.0, bodyRX: 9.2, bodyRY: 4.4,
+    headDX: 0.8, headDY: 4.6,
+    legs: { farFront: { x: 23.0 }, nearFront: { x: 25.5 },
+            farBack: { x: 8.0 }, nearBack: { x: 12.0 } },
+    tail: { lift: 1.4, sway: 1.0 }
+  };
+  side('stretch_0', Object.assign({}, stretchA));                        /* into it */
+  side('stretch_1', Object.assign({}, stretchA, {                        /* full stretch, held */
+    bodyY: -1.4, headDY: 5.2, headDX: 1.2, tail: { lift: 2.0, sway: 1.2 }
+  }));
+  side('stretch_2', Object.assign({}, stretchA, {                        /* easing back */
+    bodyY: -0.4, bodyRY: 5.0, headDY: 3.2,
+    legs: { farFront: { x: 20.5 }, nearFront: { x: 23.0 }, farBack: { x: 8.5 }, nearBack: { x: 12.5 } },
+    tail: { lift: 0.8, sway: 0.8 }
+  }));
 
   /* jump: crouch, tuck, stretch, land (the travel is the state machine's) */
   const tuck = { nearFront: { lift: 3 }, farFront: { lift: 3 }, nearBack: { lift: 3 }, farBack: { lift: 3 } };
@@ -674,16 +750,44 @@ function frames() {
   side('drink_1', Object.assign({ eyes: 'closed', mouth: 'pant', headDY: 6.0 }, atBowl));
 
   /* groom / wash: seated with a forepaw raised to her muzzle, back paws
-     tucked out of sight. The lifted paw is the whole point, so profile. */
-  const seated = {
-    bodyRX: 7.5, bodyRY: 6.0, bodyY: 2.0, headDX: -0.5,
-    legs: { farBack: { hide: true }, farFront: { hide: true }, nearBack: { hide: true }, nearFront: { lift: 4 } },
+     tucked out of sight. The lifted paw is the whole point, so profile.
+   *
+   * The body has to sit HIGH and shallow for the paw to be visible at all:
+   * legs are drawn from legTop (24 + bodyY) down to the floor, so a big low
+   * torso simply swallows them and the raised paw ends up as a four-pixel
+   * blob inside the belly. Seated cats are small and upright anyway. */
+  const seated = (pawLift) => ({
+    bodyRX: 6.6, bodyRY: 4.8, bodyY: -1.0, headDX: -0.5,
+    legs: { farBack: { hide: true }, farFront: { hide: true }, nearBack: { hide: true },
+            nearFront: { x: 20.0, lift: pawLift } },
     tail: { sway: 2.2, lift: -2.0, curl: 1.6 }
-  };
-  side('groom_0', Object.assign({ eyes: 'happy', mouth: 'open', headDY: 2.2 }, seated));
-  side('groom_1', Object.assign({ eyes: 'open', mouth: 'smile', headDY: 1.6 }, seated));
-  side('wash_0', Object.assign({ eyes: 'closed', mouth: 'open', headDY: 3.6 }, seated));
-  side('wash_1', Object.assign({ eyes: 'closed', mouth: 'pant', headDY: 3.0 }, seated));
+  });
+  side('groom_0', Object.assign({ eyes: 'happy', mouth: 'open', headDY: 2.2 }, seated(12)));
+  side('groom_1', Object.assign({ eyes: 'open', mouth: 'smile', headDY: 1.6 }, seated(13)));
+  side('wash_0', Object.assign({ eyes: 'closed', mouth: 'open', headDY: 3.6 }, seated(10)));
+  side('wash_1', Object.assign({ eyes: 'closed', mouth: 'pant', headDY: 3.0 }, seated(11)));
+
+  /* knead: working a blanket with her forepaws.
+   *
+   * Moved to profile for the same reason as the stretch. A forepaw pressing
+   * into something is a leg doing work, and the front rig has no legs — two
+   * paw ellipses merged into the torso, which cannot be seen to press. The
+   * front version read as a cat sitting with her head down.
+   *
+   * Groom is already here and shares the seated base, so the two are built to
+   * be told apart by what the paw is doing: knead presses *down* into the
+   * blanket with the head down watching it work, groom lifts the paw *up* to
+   * the muzzle. The press is a bigger forepaw lift than the groom paw, taken
+   * lower, and the head sits further forward and down over it. */
+  const knead = (pawLift, bodyY) => ({
+    bodyRX: 7.0, bodyRY: 5.0, bodyY: bodyY, headDX: -1.2,
+    eyes: 'closed', earPerk: -0.7, mouth: 'open',
+    legs: { farBack: { hide: true }, farFront: { hide: true },
+            nearBack: { hide: true }, nearFront: { x: 20.5, lift: pawLift } },
+    tail: { sway: 1.8, lift: -0.6, curl: 1.2 }
+  });
+  side('knead_0', Object.assign({ headDY: 4.0 }, knead(0, -0.6)));    /* paw pushed out */
+  side('knead_1', Object.assign({ headDY: 3.4 }, knead(3.4, 0.2)));   /* paw drawn back */
 
   /* cat tree: standing tall, reaching up at the hanging toy */
   side('tree_0', { eyes: 'open', earPerk: 1.2, bodyY: -0.6, headDY: -2.0,
