@@ -251,6 +251,7 @@
       night: ['it is dark.', 'stars out.', 'quiet in here.'],
       happy: ['i love it here.', 'best day.', 'this is the spot.'],
       alert: ['what was that?', 'did you hear?', 'hm?'],
+      bird: ['bird!', 'did you see that?', 'on the window!'],
       idle: ['nice light today.', 'i like this room.', 'just sitting.']
     }
   };

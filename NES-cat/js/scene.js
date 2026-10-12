@@ -84,6 +84,10 @@
      * a bowl here and she turns up at the new spot automatically. */
     BOWL_WATER_X: 46,
     BOWL_FOOD_X: 66,
+    /* The window's centre, so the cat can be pointed at it without either of
+     * them hardcoding the other one's geometry. The room knows where the glass
+     * is; she only knows there is something out there worth looking at. */
+    WINDOW_CX: 63,
     /* How far left of a bowl she stands to use it. The profile muzzle sits
      * about 27px into a 32px sprite, so anything less and she reaches past
      * the bowl instead of into it — which is what an 18px stand-off did,
@@ -116,6 +120,10 @@
     _stars: [],
     _birds: [],
     _birdGap: 6,
+    /* s left of "something just went past the window", which shiro.js reads
+     * to decide whether a glance should go that way. Zero when nothing is
+     * out there, which is most of the time. */
+    birdSighting: 0,
     _yarnX: 104,
     _yarnPhase: 0,
     _yarnGap: 4,
@@ -244,8 +252,13 @@
             flap: U.rand(0, Math.PI * 2),
             size: U.chance(0.35) ? 2 : 1
           });
+          /* Something just went past the window. The cat is allowed to know:
+           * a bird is the one event in this room that is worth reacting to,
+           * and without this the window is scenery she never looks at. */
+          this.birdSighting = 4.5;
         }
       }
+      if (this.birdSighting > 0) this.birdSighting -= dt;
       for (var i = this._birds.length - 1; i >= 0; i--) {
         var b = this._birds[i];
         b.p += dt / b.dur;

@@ -460,8 +460,17 @@
        * which is the same choreography with one implementation of a turn. */
       watch: {
         enter: function (sm, from) {
-          /* which way she turns to look is arbitrary and should look it */
-          self._watchDir = U.chance(0.5) ? 1 : -1;
+          /* Which way she turns to look. A bird past the window is the one
+           * thing in this room actually worth looking at, so when there is
+           * one she turns to the window; otherwise the direction is arbitrary
+           * and should look it. This is the only place the room decides
+           * anything about what she does — the rest of the time the window is
+           * scenery she happens to be standing near. */
+          var Sc = NESCAT.Scene;
+          self._watchDir = Sc.birdSighting > 0
+            ? (Sc.WINDOW_CX > this.x ? 1 : -1)
+            : (U.chance(0.5) ? 1 : -1);
+          self._watchAtWindow = Sc.birdSighting > 0;
           sm.set('turn', {
             to: 'side', from: self._shown || 'idle_open',
             facing: self._watchDir, then: 'watchHold'
@@ -638,11 +647,20 @@
       },
 
       /* alert: something caught her ear. Snaps her head up, holds, then
-       * settles — attention, not alarm, since the mouth stays a smile. */
+       * settles — attention, not alarm, since the mouth stays a smile.
+       *
+       * Which thing caught her decides what she says about it, so a startle
+       * while a bird is going past the window comes out as "bird!" rather
+       * than as a question about a noise the room does not have. */
       alert: {
         enter: function () {
           self._act = { dur: B.alertDur };
-          if (self.onSay && U.chance(0.5)) self.onSay('alert');
+          if (!self.onSay) return;
+          if (NESCAT.Scene.birdSighting > 0) {
+            if (U.chance(0.7)) self.onSay('bird');
+          } else if (U.chance(0.5)) {
+            self.onSay('alert');
+          }
         },
         update: function (dt, s) {
           if (s.time > self._act.dur) sm.set('idle');
@@ -846,8 +864,16 @@
      * is why the food weight is generous and the water weight is not. */
     if (this._sinceFood > B.foodGap && Sc.food > 0.05) pool.push(['eat', 34]);
     else pool.push(['groom', B.wGroom]);
-    /* turning to look at something without walking over to it */
-    pool.push(['watch', B.wWatch]);
+    /* Something just went past the window. She does not notice it every time
+     * — that would be a cat with a reflex — but a sighting makes both looking
+     * at it and being startled by it much likelier, and the window stops
+     * being scenery she happens to be standing near. */
+    if (Sc.birdSighting > 0) {
+      pool.push(['watch', B.wWatch * 3]);
+      pool.push(['alert', B.wAlert * 2]);
+    } else {
+      pool.push(['watch', B.wWatch]);
+    }
     /* idle postures: a stretch and a loaf are different from sitting */
     pool.push(['stretch', B.wStretch]);
     /* A loaf is a comfortable thing to do, and comfort follows the clock: in
