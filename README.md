@@ -48,9 +48,29 @@ There are no runtime npm dependencies: `npm install` is not required, and
 |---|---|
 | Click / hold **Shiro** | She headbutts your hand, and leans into it for as long as you hold |
 | **Drag** Shiro | Pick her up and carry her; she dangles, kicks, then settles |
-| Click **anywhere else** in the room | Play — notes pop and she reacts |
+| **Drag the yarn** | Push the ball of wool about. A flick throws it, and she goes after it |
+| Click **any object** | She goes and does the thing it is for — see below |
+| Click **empty floor** | Play — notes pop and she reacts |
 | Move the cursor | Her eyes follow it |
 | **SOUND: ON/OFF** button | Mute or unmute the chiptune |
+
+### The room is interactive
+
+Every object in the room is a hit target, and clicking one sends Shiro off
+to do whatever that object is for:
+
+| | |
+|---|---|
+| **the yarn** | she stalks and pounces at it, then chases where it rolls |
+| **the food bowl** | she eats. If it's empty, clicking it fills it and she goes anyway |
+| **the water bowl** | she drinks, same deal |
+| **the cat tree** | she goes over and scratches the post |
+| **the plant** | she goes over and stares at it, which is what cats do with plants |
+
+That is possible because the room is drawn through the same sprite API as the
+cat. A frame has a width and a height, so it *is* the hit box and it *is* the
+collider — there is no second list of rectangles anywhere that could disagree
+with what is on screen. See *The room is sprites* below.
 
 ## What's in it
 
@@ -60,14 +80,17 @@ things, and doing them well.
 - **A day/night cycle on your real clock.** The light through the window is
   derived from the sun's height, and so is she — she sleeps at night and is
   lively in the morning. The HUD shows the time and the phase.
-- **Twenty-two states**, and both ends of every one of them are bridged
+- **Twenty-five states**, and both ends of every one of them are bridged
   between the two sprite views so nothing ever hard-cuts. See
   *Animation states* below.
 - **The hunt.** She stalks the yarn before she pounces it, and chases it
   where it rolls. A deliberate stalk and an impulsive lunge are different
-  rolls with different weights.
+  rolls with different weights. Throw the ball yourself and she comes.
 - **Settling in.** Cats trample a spot before lying down on it, so half of
   her loaves are preceded by a circle.
+- **Furniture that is actually furniture.** She walks round the planter and
+  cannot be dropped inside it. She reaches the cat tree by standing with her
+  shoulder against the plinth.
 - **Generative chiptune.** No fixed melody: every step picks from a minor
   pentatonic pool through a lowpass + delay, so it never repeats exactly, and
   she bounces on the beat.
@@ -94,17 +117,75 @@ NES-cat/
   js/
     config.js         THE tuning surface (sizes, timings, day/night keys)
     palette.js        NES.css-derived palette + day/night interpolation
-    frames.js         literal 32x32 pixel frames for Shiro (GENERATED)
+    frames.js         literal pixel frames: Shiro at 32x32, the room's objects
+                      at whatever size they are (GENERATED)
     sprite.js         reusable sprite API: makeSprite/draw/state machine
-    scene.js          the room, lighting and ambient animation
-    shiro.js          Shiro: state machine, needs, particles
+    scene.js          the room, lighting, ambient animation, OBJECTS table
+    shiro.js          Shiro: state machine, needs, particles, notice()
     input.js          one pointer path for mouse + touch
     audio.js          generative chiptune (p5.sound), guarded
     ui.js             NES.css HUD: gate, dialogue, clock, sound
   css/style.css       theme bridge + HUD layout
 tools/
-  build-sprites.js    generates js/frames.js (all poses)
+  build-sprites.js    generates js/frames.js (the cat and the room's objects)
+  check-animations.js drives the state machine headlessly (npm run anim:check)
 ```
+
+## The room is sprites
+
+The cat is not the only thing built on `NESCAT.Sprite`. The furniture is too,
+and that is not for tidiness — it is what makes the room *addressable*.
+
+The room used to be 184 calls to `rect`/`disc`/`pxLine` and not one reference
+to the sprite API. A pile of drawing calls is a picture and nothing else:
+nothing in it knows how big a ball of wool is, so there was no way to ask
+whether a click landed on one, and no way to stop a cat walking through the
+planter. Both were true — she could be dropped exactly onto the pot at x=271
+and the game reported no problem, and the yarn was a thing that rolled about
+on a timer rather than a thing you could touch.
+
+As frames, the same data answers all of it at once. A frame has a width and a
+height, so it **is** the hit box and it **is** the collider, and the string
+that draws it is the thing you point at. One source, so the hit test and the
+collider cannot drift out of agreement with what is on screen.
+
+`OBJECTS` in `scene.js` is the single table: which sprite, which pixel is the
+anchor, where it sits, whether she can walk through it, whether you can pick
+it up, and how wide its shadow is. The renderer, the hit test and the collider
+all read it.
+
+Three things about it that took a second pass, and are the kind that are
+obvious only after they have gone wrong:
+
+- **A hit box and a collider are different questions.** The cat tree's box is
+  46 wide and 82 tall, because you should be able to reach up and touch the
+  bed. The thing that would stop her walking into it is the plinth, which is
+  6px tall — and because the room is drawn before her, standing in front of a
+  plinth looks like standing in front of a plinth. The plant is the opposite:
+  22px of solid pot rim at exactly her height, so being "inside" it puts her
+  legs over the front of the rim with the rim crossing them.
+- **The collision push-out has to know where she started.** Moving her to the
+  nearest clear edge is right when she was *placed* somewhere silly. It is
+  badly wrong when she is *walking*: a 2px step to the left from just right of
+  the cat tree resolves to "nearest edge" on the *far* side, and the cat
+  teleports thirty pixels through a post she was about to walk into. A
+  resolved position further from where she started than the step she asked for
+  is refused, and the caller reads that as blocked.
+- **`arrive()` is exempt from collision, and has to be.** A fixture's
+  stand-off is computed from that fixture's own geometry, so it is by
+  construction a place she is *meant* to stand. She scratches the post by
+  standing with her shoulder against the plinth; collision there would push
+  her off the thing she came for.
+
+Collision is one-dimensional on purpose. Everything in the room stands on the
+floor and none of it can be climbed, so what needs resolving is *which
+stretches of floor are occupied* — and the walls are one-dimensional already.
+
+Each object carries its own `charColors`, so a palette is local to the object
+rather than being one global table the cat and the furniture both have to
+agree about. The frames are still lit through `Sprite.draw`'s ambient, at the
+same weight the hand-drawn room used, so becoming a sprite did not also change
+how the light falls on them.
 
 ## Rendering
 

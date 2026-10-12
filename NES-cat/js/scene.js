@@ -101,6 +101,10 @@
     yarn: {
       sprite: 'yarn', ax: 13, ay: 6, x: 104, y: 166,
       solid: false, grab: true, label: 'the yarn',
+      /* how far it can be pushed about. Not the whole floor: a ball of wool
+       * that could be thrown behind the sofa would come to rest somewhere the
+       * cat has no reason to go and be useless there. */
+      grabRange: [92, 138],
       shadowW: 8            /* the ball only — the strand lies flat in the
                               * same light and casts nothing */
     },
@@ -283,7 +287,13 @@
     },
 
     /* Which object a point is on, or null. Later entries win, so a thing that
-     * overlaps another is reachable in front of it. */
+     * overlaps another is reachable in front of it.
+     *
+     * This is the whole of "is the room interactive": before the room went
+     * through the sprite API there was nothing to ask this question with. The
+     * only hit test in the piece was `_hitShiro`, which is a bounding box
+     * against a hardcoded 32, and it could not have answered this — it does
+     * not know what else there is, or how big it is. */
     objectAt: function (px, py) {
       for (var i = 0; i < Object.keys(OBJECTS).length; i++) {
         var name = Object.keys(OBJECTS)[i];
@@ -292,6 +302,56 @@
         if (px >= b.x && px < b.x + b.w && py >= b.y && py < b.y + b.h) return name;
       }
       return null;
+    },
+
+    /* ---------- picking things up ----------------------------------------
+     *
+     * Only the yarn is grabbable so far, and deliberately: a ball of wool is
+     * the one object in a cat's room you would actually pick up and throw, and
+     * the bowls and the cat tree are the ones you would *use*. They are all
+     * interactive, just in a different way — see Shiro.notice.
+     *
+     * Dragging keeps the grab point rather than centring on the pointer, so
+     * the ball does not snap to your cursor the moment you touch it.
+     */
+    grab: function (name, atX) {
+      if (!OBJECTS[name] || !OBJECTS[name].grab) return false;
+      this._holding = { name: name, dx: this.objectX(name) - atX };
+      /* stop her own rolling animation: a ball under the pointer is not also
+       * rolling away on a timer, and two things moving it at once fights */
+      if (name === 'yarn') { this._yarnAnim = 0; this._yarnGap = 6; }
+      return true;
+    },
+
+    dragObject: function (atX) {
+      if (!this._holding) return;
+      var d = OBJECTS[this._holding.name];
+      var range = d.grabRange || [0, this.WALK_MAX_X];
+      var nx = U.clamp(atX + this._holding.dx, range[0], range[1]);
+      /* her own collision, not the player's: a ball you drop under the
+       * planter would otherwise end up inside it, and the next thing that
+       * happened would be a cat pouncing into a pot */
+      if (d.solid) nx = this.avoidSolids(nx, (d.collideW || 0) / 2);
+      this.setObjectX(this._holding.name, nx);
+    },
+
+    /* Let go. The yarn is given the momentum of the last drag so a flick
+     * throws it and a gentle placement does not — which is the difference
+     * between an object and a decoration. */
+    releaseObject: function (speed) {
+      if (!this._holding) return;
+      var name = this._holding.name;
+      var v = Math.abs(speed || 0);
+      this._holding = null;
+      if (name === 'yarn' && v > 6) this.nudgeYarn(null, Math.min(26, 6 + v * 0.12));
+    },
+
+    /* The yarn moves; everything else is furniture and does not. One setter so
+     * the drag path and the idle rolling cannot drift into writing to
+     * different fields. */
+    setObjectX: function (name, x) {
+      if (name !== 'yarn') return;
+      this._yarnX = U.clamp(x, this.YARN_MIN_X, this.YARN_MAX_X);
     },
 
     /* Collision.

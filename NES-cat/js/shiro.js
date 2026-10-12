@@ -1011,6 +1011,63 @@
     if (this._sm.states[kind]) this._sm.set(kind, kind === 'circle' ? { then: 'loaf' } : {});
   };
 
+  /* ---------- pointing her at things --------------------------------------- */
+
+  /* You clicked something in the room; she goes and does the thing it is for.
+   *
+   * This is what makes the room interactive rather than merely drawn, and it
+   * is the payoff for the room going through the sprite API: the hit test can
+   * name an object, and naming it is enough to route a behaviour.
+   *
+   * Every object is wired. The yarn sends her hunting, the bowls send her to
+   * eat or drink, the cat tree sends her to scratch it, and the plant — which
+   * has nothing she would ever do to it — sends her to go and look at it,
+   * which is the actual thing cats do with a plant.
+   *
+   * An empty bowl is the interesting case. There is no point walking to a
+   * bowl that is visibly empty, so clicking one fills it and she goes anyway
+   * a moment later. That keeps the bowls worth clicking after she has emptied
+   * them, which is most of the time, because the piece refills them slowly on
+   * purpose.
+   *
+   * Nothing is offered while she is being carried: interrupting that would
+   * drop her in mid-air, and a cat being carried does not also go and scratch
+   * something. Clicking her while she sleeps wakes her, which is the one
+   * interaction that overrides what she is doing. */
+  Shiro.notice = function (name) {
+    var Sc = NESCAT.Scene;
+    if (this._sm.is('held') || this._sm.is('held_lift')) return false;
+    if (this._sm.is('sleep')) { this.wake(); return true; }
+
+    switch (name) {
+      case 'food':
+        if (Sc.food <= 0.02) { Sc.food = 1; say('nom'); this._sinceFood = 0; }
+        this._sm.set('eat');
+        return true;
+      case 'water':
+        if (Sc.water <= 0.02) { Sc.water = 1; say('nom'); this._sinceWater = 0; }
+        this._sm.set('drink');
+        return true;
+      case 'tree':
+        this._sm.set('scratch');
+        return true;
+      case 'yarn':
+        /* A ball just thrown by hand is the best possible reason to hunt, so
+         * it restarts the hunt rather than joining one in progress: three
+         * goes, not whatever was left of what she was already doing. */
+        this._hunt = 0;
+        this._sinceFood = 0;
+        this._sm.set('stalk');
+        return true;
+      case 'plant':
+        /* there is nothing she does to a plant except stare at it */
+        this._sm.set('watch');
+        return true;
+      default:
+        return false;
+    }
+  };
+
   /* ---------- interactions --------------------------------------------- */
 
   Shiro.petStart = function () {
