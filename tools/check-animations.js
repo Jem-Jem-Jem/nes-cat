@@ -62,7 +62,22 @@ function loadShiro() {
     nudgeYarn(fromX, power) { calls.push(['nudgeYarn', fromX, power]); },
     takeFood() { this.food = Math.max(0, this.food - 0.34); calls.push(['takeFood']); return this.food; },
     takeWater() { this.water = Math.max(0, this.water - 0.34); calls.push(['takeWater']); return this.water; },
-    updateBowls() {}, updateToy() {}
+    updateBowls() {}, updateToy() {},
+    /* Collision, matching scene.js's real spans: the cat tree's rope post and
+     * the plant's pot. Deliberately the real numbers rather than a no-op, so
+     * that a state which walks her somewhere the furniture now blocks is
+     * caught here instead of only in a browser. */
+    solids() {
+      return [{ name: 'tree', x0: 209, x1: 217 }, { name: 'plant', x0: 260, x1: 282 }];
+    },
+    avoidSolids(x, halfW) {
+      for (const s of this.solids()) {
+        if (x + halfW <= s.x0 || x >= s.x1) continue;
+        const left = s.x0 - halfW, right = s.x1 + halfW;
+        x = (x - left <= right - x) ? left : right;
+      }
+      return Math.max(this.WALK_MIN_X, Math.min(this.WALK_MAX_X, x));
+    }
   };
   sandbox.NESCAT = { Scene, calls };
 

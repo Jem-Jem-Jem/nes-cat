@@ -90,6 +90,12 @@
    * does not walk through the planter; but she does walk over the rug and
    * through the gap between the two bowls, and marking those solid would
    * fence her out of the middle of her own room.
+   *
+   * `collideW` / `collideX` are separate from the box on purpose. The cat
+   * tree's box is 46 wide and 82 tall, because you should be able to reach up
+   * and touch the bed; the thing that stops her walking into it is the post,
+   * which is 8 wide. A hit box and a collider are different questions and the
+   * answers here are nothing alike.
    */
   var OBJECTS = {
     yarn: {
@@ -112,11 +118,28 @@
     },
     tree: {
       sprite: null, ax: 23, ay: 82, x: 215, y: 138,
-      solid: true, grab: false, label: 'the cat tree'
+      /* Not solid, and the reason is the draw order: the room is painted
+       * before her, so she is always in front of the furniture. What meets her
+       * at floor level is a 6px plinth, and standing in front of a plinth
+       * looks like standing in front of a plinth. Her whole body is above it
+       * anyway — the rest of the tree is 82px over her head.
+       *
+       * Making it solid was tried and is worse in both directions: she can no
+       * longer cross the room, because the plinth is 46px of a 250px floor and
+       * she has to get from one side of it to the other, and the only way past
+       * was a 30px teleport through a post she was walking into. */
+      solid: false, grab: false, label: 'the cat tree',
+      shadowW: 46
     },
     plant: {
       sprite: null, ax: 11, ay: 38, x: 271, y: 140,
-      solid: true, grab: false, label: 'the plant'
+      /* Solid, and for the opposite reason. The pot is 22px of solid rim at
+       * exactly her height, and because she is drawn in front of it, being
+       * "inside" the plant puts her legs over the front of the pot with the
+       * rim crossing them. That reads as a cat standing in a bucket. */
+      solid: true, grab: false, label: 'the plant',
+      collideW: 22, collideX: 0,           /* the pot */
+      shadowW: 22
     }
   };
   var SOLID = Object.keys(OBJECTS).filter(function (k) { return OBJECTS[k].solid; });
@@ -275,43 +298,83 @@
      *
      * Before this, nothing in the piece had any: she could be dropped exactly
      * onto the planter at x=271 and the game reported no problem, because the
-     * only thing constraining her was the room's walls. Walking a cat through
-     * a plant is the kind of thing that reads as broken no matter how
-     * charming everything else is.
+     * only thing constraining her was the room's walls.
      *
-     * Only the two things that stand *in* the floor stop her. The rug is not
-     * solid and neither is a bowl — she steps over a rug, and she has to be
-     * able to get to the bowls. Fencing off everything the room contains
-     * would leave her a corridor.
+     * The model is one-dimensional on purpose. Everything in this room stands
+     * on the floor and none of it can be climbed, so what actually needs
+     * resolving is *which stretches of floor are occupied*. Everything else is
+     * wall-to-wall and one-dimensional already, so doing this in 2D would be
+     * solving a problem the room does not have.
      *
-     * Shallow rather than resolved: she is pushed back to the nearest edge
-     * she is not inside, and that is the whole behaviour. A cat does not
-     * slide along obstacles; she picks a path that goes round, and her
-     * wandering targets already avoid the furniture (see treeNearX), so this
-     * only has to catch the cases where she is *placed* somewhere silly. */
+     * Shallow rather than resolved: she is pushed back to the nearer edge she
+     * is not inside. A cat does not slide along obstacles, she picks a path
+     * that goes round — and her wandering targets already steer away from the
+     * furniture (see treeNearX), so this only has to catch the cases where
+     * she is *placed* somewhere silly, or a random walk happens to aim at the
+     * planter. */
     solids: function () {
       var out = [];
       for (var i = 0; i < SOLID.length; i++) {
-        var b = this.box(SOLID[i]);
-        if (b) out.push({ name: SOLID[i], x: b.x, y: b.y, w: b.w, h: b.h });
+        var d = OBJECTS[SOLID[i]];
+        var cx = d.x + (d.collideX || 0);
+        var w = d.collideW || d.ax * 2;
+        out.push({ name: SOLID[i], x0: cx - w / 2, x1: cx + w / 2 });
       }
       return out;
     },
 
-    /* Push an x out of anything solid she is standing in. Her body is 32
-     * wide; the box is what she would be standing inside. Returns the
-     * corrected x. */
-    avoidSolids: function (x, halfW) {
+    /* Push an x out of anything solid she is standing in.
+     *
+     * `halfW` is half her *body*, not half her sprite. A 32px walking frame is
+     * 32 wide because a cat's legs swing out to the edges of it, but the
+     * middle twenty pixels are what is actually on the floor; measuring her
+     * from the sprite would put her a six-pixel halo of empty air either side
+     * of everything, and she would stop well short of the post she is reaching
+     * for.
+     *
+     * `fromX` is where she was, and it is the whole reason this takes three
+     * arguments. Pushing her out of the nearest edge is right when she was
+     * *placed* somewhere silly — she drops onto the planter and lands beside
+     * it. It is badly wrong when she is *walking*: a 2px step to the left from
+     * just right of the cat tree resolves to "nearest edge" on the far side,
+     * and the cat teleports thirty pixels through a post she was about to
+     * walk into. So a resolved position that is further from where she started
+     * than the step she asked for is refused, and the caller treats that as
+     * blocked. */
+    avoidSolids: function (wantX, halfW, fromX) {
+      var x = wantX;
       var list = this.solids();
       for (var i = 0; i < list.length; i++) {
         var s = list[i];
-        if (x + halfW <= s.x || x >= s.x + s.w) continue;
-        /* inside horizontally — pick the nearer edge to fall out of */
-        var left = s.x - halfW;
-        var right = s.x + s.w;
+        if (x + halfW <= s.x0 || x >= s.x1) continue;
+        var left = s.x0 - halfW;
+        var right = s.x1 + halfW;
         x = (x - left <= right - x) ? left : right;
       }
+      if (fromX != null && x !== wantX) {
+        /* refused: the resolution is further away than the step asked for */
+        if (Math.abs(x - fromX) > Math.abs(wantX - fromX)) return fromX;
+      }
       return U.clamp(x, this.WALK_MIN_X, this.WALK_MAX_X);
+    },
+
+    /* Can she get from where she is to x, unobstructed? Used by the walker to
+     * decide whether a destination is reachable at all, so it can pick another
+     * one rather than walk into a wall of furniture forever. */
+    canReach: function (fromX, toX, halfW) {
+      var list = this.solids();
+      var step = Math.sign(toX - fromX) || 1;
+      for (var x = fromX; step > 0 ? x <= toX : x >= toX; x += step) {
+        for (var i = 0; i < list.length; i++) {
+          var s = list[i];
+          if (x + halfW <= s.x0 || x >= s.x1) continue;
+          /* she may already be overlapping — she was dropped there, or she is
+           * standing at a fixture. That is not the walk being blocked. */
+          if (Math.abs(x - fromX) < 1) continue;
+          return false;
+        }
+      }
+      return true;
     },
 
     /* ---------- reactions to Shiro ---------------------------------------- */

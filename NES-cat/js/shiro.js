@@ -126,7 +126,15 @@
           var dx = self._targetX - self.x;
           var speed = 26;                     /* logical px/s */
           if (Math.abs(dx) < 1.5) { self.endWalk(); return; }
-          self.x += Math.sign(dx) * speed * dt;
+          /* Stop at the furniture rather than walking through it. A wander
+           * target is picked at random across the whole floor, so it lands
+           * inside the planter a couple of times an evening; ending the walk
+           * there reads as her deciding not to go that way, which is what a
+           * cat does. */
+          var next = NESCAT.Scene.avoidSolids(self.x + Math.sign(dx) * speed * dt,
+                                              Shiro.BODY_HALF, self.x);
+          if (next === self.x) { self.endWalk(); return; }
+          self.x = next;
           self._bob += dt * 11;
           if (s.time > self._walkDur + 1.5) self.endWalk();
         }
@@ -734,6 +742,20 @@
       act.arrived = true;
       return true;
     }
+    /* Deliberately NOT collision-checked, and this is the one movement path in
+     * the piece that is exempt.
+     *
+     * A fixture's stand-off is computed from that fixture's own geometry —
+     * CAT_TREE_X minus TREE_GAP, and so on — so it is by construction a place
+     * she is *meant* to stand. The cat tree is the reason this needs saying:
+     * she scratches the post by standing with her shoulder against the plinth,
+     * so her target is a few pixels inside the plinth's collider. Collision
+     * there would push her off the thing she came for.
+     *
+     * Which is the right division: collision exists to stop her walking into
+     * furniture and being dropped inside it, and both of those are the wander
+     * and the drag. Those two cannot be trusted to know where the furniture
+     * is. This one can. */
     this.facing = dx < 0 ? -1 : 1;
     this.x += Math.sign(dx) * (speed || CFG.BEHAVIOR.approachSpeed) * dt;
     this._bob += dt * 11;
@@ -813,9 +835,16 @@
    * pivots into profile first if she is still front-on — walking is the
    * most common transition in the piece, so it is the one that must not
    * hard-cut between the two views. */
+  /* Half the width of her *body*, which is what occupies floor — not half her
+   * sprite. A 32px walking frame is 32 wide because a cat's legs swing out to
+   * the edges of it; the middle twenty are what is on the floor. Measuring
+   * her from the sprite gives her a six-pixel halo of empty air either side of
+   * everything, and she stops short of the post she is reaching for. */
+  Shiro.BODY_HALF = 10;
+
   Shiro.startWalk = function (targetX) {
     var Sc = NESCAT.Scene;
-    var t = targetX != null ? targetX : U.rand(Sc.WALK_MIN_X, Sc.WALK_MAX_X);
+    var t = targetX != null ? targetX : Shiro._somewhereToWalk();
     var dir = t < this.x ? -1 : 1;
     this.facing = dir;
     this._pendingWalk = t;
@@ -823,6 +852,41 @@
     /* hold the pose she is actually in, not a hardcoded 'idle_open' — she may
      * be setting off from a sit, a stretch or the end of a shake */
     this._sm.set('turn', { to: 'side', from: this._shown || 'idle_open', facing: dir, then: 'walk' });
+  };
+
+  /* Somewhere to walk to, and it is somewhere she can actually get to.
+   *
+   * A wander target was a uniform pick across the whole floor, which is fine
+   * when the floor is empty and wrong the moment it is not: the planter takes
+   * up 22px of the walkable span, so a small share of wander rolls aimed her
+   * at the inside of a plant. Now that there is collision those walks end at
+   * the edge of it, which is fine as behaviour but a waste of the roll.
+   *
+   * So the target is drawn from the *free* spans rather than the whole floor.
+   * That is not just an optimisation — it is why the free spans are computed
+   * from the collision table in the first place. A second is spent on it and
+   * four are saved on average. */
+  Shiro._somewhereToWalk = function () {
+    var Sc = NESCAT.Scene;
+    var gaps = [];
+    var solids = Sc.solids().slice().sort(function (a, b) { return a.x0 - b.x0; });
+    var cur = Sc.WALK_MIN_X;
+    for (var i = 0; i < solids.length; i++) {
+      if (solids[i].x0 > cur) gaps.push([cur, solids[i].x0]);
+      cur = Math.max(cur, solids[i].x1);
+    }
+    if (cur < Sc.WALK_MAX_X) gaps.push([cur, Sc.WALK_MAX_X]);
+    /* every span is blocked (not remotely possible, but a roll must not throw) */
+    if (!gaps.length) return U.rand(Sc.WALK_MIN_X, Sc.WALK_MAX_X);
+    var total = 0, i2;
+    for (i2 = 0; i2 < gaps.length; i2++) total += gaps[i2][1] - gaps[i2][0];
+    var r = Math.random() * total;
+    for (i2 = 0; i2 < gaps.length; i2++) {
+      var w = gaps[i2][1] - gaps[i2][0];
+      if (r < w) return U.rand(gaps[i2][0], gaps[i2][1]);
+      r -= w;
+    }
+    return U.rand(Sc.WALK_MIN_X, Sc.WALK_MAX_X);
   };
 
   /* Arrive at the end of a walk, turning back to face the room first.
@@ -992,6 +1056,11 @@
   };
 
   Shiro.dragTo = function (x, y) {
+    /* Carried, so she passes over the furniture and is only put down clear of
+     * it — a cat being lifted to the other side of a room is not the same as a
+     * cat being placed inside a planter. dragEnd is where the collision
+     * actually has to bite, because that is the moment she becomes part of the
+     * room again. */
     this.x = U.clamp(x, NESCAT.Scene.WALK_MIN_X - 12, NESCAT.Scene.WALK_MAX_X + 12);
     if (y == null) return;
     /* Grab point is roughly the middle of the sprite (row 16). Solving
@@ -1004,7 +1073,13 @@
   Shiro.dragEnd = function () {
     this.dragging = false;
     this._squashV = 10;
-    /* drop her: fall back to the floor, then shudder off on landing */
+    /* drop her: fall back to the floor, then shudder off on landing.
+     *
+     * And put her clear of anything solid first. This is the one place it
+     * mattered: before the room had collision, you could drop a cat exactly
+     * onto the planter and the game was entirely happy about it, because the
+     * only thing that constrained her anywhere was the room's walls. */
+    this.x = NESCAT.Scene.avoidSolids(this.x, Shiro.BODY_HALF);
     this._lift = 0;
     this._sm.set('shake');
   };
