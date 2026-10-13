@@ -1920,7 +1920,53 @@ if (mode === '--check') {
   const poseArg = process.argv.indexOf('--pose');
   const pose = poseArg >= 0 ? process.argv[poseArg + 1] : null;
 
-  if (pose === 'tail') {
+  if (pose === 'head') {
+    console.log('\n---- ROTATABLE HEAD, 64x64: pivot at the NECK, not the skull centre ----');
+    const H2 = G.head, PV = G.headPivot;
+    console.log('  skull centre (' + H2.x + ',' + H2.y + ')  rx=' + H2.rx + ' ry=' + H2.ry);
+    console.log('  neck joint  (' + (H2.x + H2.rx * PV.dx).toFixed(1) + ',' +
+      (H2.y + H2.ry * PV.dy).toFixed(1) + ')  = centre + (' + (H2.rx * PV.dx).toFixed(1) +
+      ',' + (H2.ry * PV.dy).toFixed(1) + ')');
+
+    const angles = [-50, -30, -20, -10, 0, 10, 20, 30, 50];
+    console.log('\n    tilt   muzzle          ear tip         pivot      in frame?');
+    angles.forEach(t => {
+      const sv = rig2.headSolve({ headTilt: t }, G);
+      /* ALL THREE vertices of BOTH ears, not just the apexes: the base and
+       * inner corners swing furthest and are what actually clip first. */
+      const all = [sv.skull, sv.cheek, sv.nose, sv.eye, sv.pinkL, sv.pinkR,
+                   sv.earL[0], sv.earL[1], sv.earL[2],
+                   sv.earR[0], sv.earR[1], sv.earR[2]];
+      let ok = true;
+      all.forEach(q => { if (q[0] < 1 || q[0] > N - 2 || q[1] < 1 || q[1] > N - 2) ok = false; });
+      console.log('  ' + String(t).padStart(5) + '  (' + sv.nose[0].toFixed(1) + ',' + sv.nose[1].toFixed(1) + ')'.padEnd(15) +
+        ' (' + sv.earR[1][0].toFixed(1) + ',' + sv.earR[1][1].toFixed(1) + ')'.padEnd(15) +
+        ' (' + sv.pivot[0].toFixed(1) + ',' + sv.pivot[1].toFixed(1) + ')'.padEnd(11) +
+        (ok ? 'yes' : 'NO — off the canvas'));
+    });
+
+    const dr = rig2.headDrift(0, N);
+    console.log('\n  muzzle travels ' + dr.muzzle.toFixed(2) + 'px and the ear tip ' +
+      dr.ear.toFixed(2) + 'px per 10 degrees of tilt');
+
+    /* distinct silhouettes across the sweep */
+    /* NB: the test must be v !== '.', NOT truthiness. Every non-empty
+       string is truthy, so v ? '1' : '0' marks the background as ink
+       and every silhouette in the sweep comes out identical. */
+    const key = rows => rows.map(r => r.split('').map(v => v !== '.' ? '1' : '0').join('')).join('|');
+    const set = new Set();
+    for (let i = 0; i <= 200; i++) {
+      set.add(key(rig2.drawHeadOnCat({ headTilt: -60 + (i / 200) * 120 }, host, N).rows));
+    }
+    console.log('  distinct head silhouettes across a 201-sample -60..+60 sweep: ' + set.size);
+
+    console.log('\n---- the head on the cat ----');
+    [0, 15, 30, 45].forEach(t => {
+      const d = rig2.drawHeadOnCat({ headTilt: t }, host, N);
+      console.log('\n  headTilt=' + t + ' deg');
+      for (let y = 0; y < 46; y++) console.log('   ' + String(y).padStart(2) + ' ' + d.rows[y]);
+    });
+  } else if (pose === 'tail') {
     /* The tail is a chain, so the useful view is the CHAIN on its own
      * next to the cat it belongs to: a tail that only ever looks right
      * in context proves nothing about whether it tapers or curls. */

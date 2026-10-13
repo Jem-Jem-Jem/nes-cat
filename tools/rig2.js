@@ -67,6 +67,23 @@ function makeHost(w, h) {
     }
     return m;
   };
+  /* An ellipse rotated about its own centre. The pixel centre is still
+   * (x + 0.5, y + 0.5) — the SAME convention as maskEllipse — and the
+   * test rotates the offset into the ellipse's frame rather than
+   * sampling at a shifted origin. Sampling at a shifted origin is what
+   * puts a shape half a pixel off everything else in the sprite, and on
+   * a head that is the difference between a tilt and a fault. */
+  const maskEllipseRot = (cx, cy, rx, ry, ang) => {
+    const m = emptyMask();
+    const c = Math.cos(-ang), s = Math.sin(-ang);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+      const u = dx * c - dy * s, v = dx * s + dy * c;
+      const a = u / rx, b = v / ry;
+      if (a * a + b * b <= 1) m[y][x] = true;
+    }
+    return m;
+  };
   const maskTri = (ax, ay, bx, by, cx2, cy2) => {
     const m = emptyMask();
     const sign = (px, py, x1, y1, x2, y2) => (px - x2) * (y1 - y2) - (x1 - x2) * (py - y2);
@@ -117,7 +134,7 @@ function makeHost(w, h) {
     paint(G, m, fill, outline);
     return m;
   };
-  return { W: w, H: h, grid, emptyMask, maskOr, maskEllipse, maskTri, paint, px, shadeBelow, stampCurve };
+  return { W: w, H: h, grid, emptyMask, maskOr, maskEllipse, maskEllipseRot, maskTri, paint, px, shadeBelow, stampCurve };
 }
 
 /* the default grid, so maskChain works with no host at all */
@@ -212,6 +229,11 @@ const GEOM_32 = {
   PAW_Y: 26.3,
   body: { x: 15.0, y: 21.0, rx: 8.5, ry: 4.8 },
   head: { x: 22.5, y: 13.5, rx: 6.0, ry: 5.5 },
+  /* the NECK joint, as a fraction of the skull radius from its centre.
+   * See section 6: not the skull centre, because a head that spins on
+   * its own centre is not a head tilting. */
+  headPivot: { dx: -0.62, dy: 0.67 },
+  headTiltRange: { min: -18, max: 30 },
   headEar: { top: 9.4, wide: 6.2, inner: 4.0, pink: [3.9, 5.6] },
   tail: { base: 2.5, c1: 3.2, c2: 5.0, rise: 8.0, r: 2.4, from: 0.5, c1y: 1.5, c2y: 8.0 },
   /* the CHAIN tail, beside the bezier above. 32x64 and 2.4 -> 1.0 radii:
@@ -252,6 +274,10 @@ const GEOM_64 = {
   PAW_Y: 55.0,
   body: { x: 29.0, y: 34.0, rx: 15.0, ry: 8.5 },
   head: { x: 46.0, y: 18.0, rx: 9.5, ry: 9.0 },
+  /* the NECK joint: (46 - 9.5*0.62, 18 + 9*0.67) = (40.1, 24.0), which
+   * sits just above the front of the chest where a neck belongs. */
+  headPivot: { dx: -0.62, dy: 0.67 },
+  headTiltRange: { min: -30, max: 50 },
   headEar: { top: 12.0, wide: 11.0, inner: 8.0, pink: [6.6, 10.0] },
   tail: { base: 5.0, c1: 6.4, c2: 12.0, r: 4.0, from: 5.0, c1y: 7.0, c2y: 12.0 },
   /* the CHAIN tail, beside the bezier above. The old one is three control
@@ -982,11 +1008,173 @@ function drawTailOnCat(p, host, size) {
   return G.map(r => r.join(''));
 }
 
+/* ---------- 6. the head, which tilts -------------------------------------
+ *
+ * WHY THE PIVOT IS NOT THE SKULL CENTRE.
+ *
+ * The obvious pivot is the middle of the skull ellipse, and it is the
+ * wrong one. Rotating a head about its own centre makes the skull spin
+ * where it sits: the muzzle and the ears orbit, the chin swings out into
+ * the chest, and the result reads as a head being turned on a turntable
+ * rather than a cat tipping her head. What actually happens when a cat
+ * looks down is that the BACK OF THE SKULL STAYS PUT — it is resting on
+ * the shoulders — and the whole face swings forward and down about the
+ * neck.
+ *
+ * So the pivot is the neck joint: the back of the skull, where it meets
+ * the spine. On this cat that is about 0.62 of the skull radius behind
+ * the centre and 0.67 below it, which at 64x64 puts it at (40.1, 24.0)
+ * — just above the front of the chest, where a neck would actually be.
+ * Expressed as fractions of rx/ry so it scales with the head.
+ *
+ * SIGN. Positive headTilt drops the muzzle: the face is at +x from the
+ * pivot, and positive screen rotation carries +x toward +y, which is
+ * down. So positive = looking down, which is the intuitive direction.
+ *
+ * EVERYTHING IS AN OFFSET FROM THE SKULL CENTRE and every offset is
+ * rotated about the pivot — skull, cheek, both ears, both pink ears, the
+ * eye, the nose, the mouth. A skull that tilts while its ears stay put
+ * is worse than no rotation at all, and this file already carries a
+ * comment recording that exact bug having happened once.
+ */
+function headSolve(p, g) {
+  const head = g.head;
+  const E = g.headEar;
+  const hx = head.x + (p.headDX || 0);
+  const hy = head.y + (p.headDY || 0) + (p.bodyY || 0);
+  /* the neck joint, in skull radii from the skull centre */
+  const pv = g.headPivot;
+  const px = hx + head.rx * pv.dx;
+  const py = hy + head.ry * pv.dy;
+
+  const a = (p.headTilt || 0) * DEG;
+  const c = Math.cos(a), s = Math.sin(a);
+  /* rotate a skull-relative offset about the NECK, not about the skull.
+   * The vector from the neck to a point is the skull-centre offset MINUS
+   * the centre-to-neck vector — getting that sign wrong displaces the
+   * whole face even at zero tilt, which is the easiest way to ship a
+   * head that is subtly wrong in every frame. */
+  const rot = (ox, oy) => {
+    const dx = ox - head.rx * pv.dx;
+    const dy = oy - head.ry * pv.dy;
+    return [px + dx * c - dy * s, py + dx * s + dy * c];
+  };
+  const tri = pts => pts.map(q => rot(q[0], q[1]));
+
+  return {
+    angle: p.headTilt || 0,
+    pivot: [px, py],
+    centre: [hx, hy],
+    skull: rot(0, 0),
+    cheek: rot(head.rx * 0.62, head.ry * 0.29),
+    earL: tri([[-head.rx * 0.77, -head.ry * 0.62], [-E.wide, -E.top], [-head.rx * 0.10, -head.ry * 0.91]]),
+    earR: tri([[head.rx * 0.37, -head.ry * 0.73], [E.wide * 0.90, -E.top * 0.98], [head.rx * 0.90, -head.ry * 0.65]]),
+    pinkL: rot(-E.pink[0], -E.pink[1]),
+    pinkR: rot(E.pink[1], -E.pink[1] - 0.2),
+    eye: rot(head.rx * 0.10, -head.ry * 0.18),
+    nose: rot(head.rx * 0.82, head.ry * 0.18)
+  };
+}
+
+/* The tilt is a number in a flat pose, so it lerps with everything else.
+   There is no table of authored head tilts anywhere in this file. */
+function headTiltPose(t, size) {
+  const g = geomFor(size);
+  const u = frac(t);
+  const R = g.headTiltRange;
+  return {
+    bodyY: 0, headDX: 0, headDY: 0,
+    /* down and back up again: a slow look-down, a slower look-up */
+    headTilt: R.max - (R.max - R.min) * (0.5 - 0.5 * Math.cos(2 * Math.PI * u))
+  };
+}
+
+/* How far the face wanders per degree of tilt. This is the number that
+ * says whether the head is usable or a liability: below about a pixel
+ * per 10 degrees the tilt changes nothing on screen, and above about
+ * three the eye starts hopping between pixels instead of travelling. */
+function headDrift(deg, size) {
+  const g = geomFor(size);
+  const a = headSolve({ headTilt: deg }, g);
+  const b = headSolve({ headTilt: deg + 10 }, g);
+  return {
+    muzzle: Math.hypot(a.nose[0] - b.nose[0], a.nose[1] - b.nose[1]),
+    ear: Math.hypot(a.earR[0][0] - b.earR[0][0], a.earR[0][1] - b.earR[0][1])
+  };
+}
+
+/* The head drawn on the cat at a tilt. Same parts, same colours, same
+ * (x + 0.5) pixel convention as everything else — only the pivot
+ * changes. Kept separate from drawFrame so a tilt is a preview and can
+ * never reach the frames a frame build emits. */
+function drawHeadOnCat(p, host, size) {
+  const g = geomFor(size);
+  host = host || makeHost(g.size, g.size);
+  const G = host.grid();
+  const body = g.body;
+  const bx = body.x, by = body.y + (p.bodyY || 0);
+  const s = headSolve(p, g);
+
+  host.stampCurve(G,
+    [bx - body.rx + g.tail.base, by - g.tail.from],
+    [bx - body.rx + g.tail.base - g.tail.c1 - (p.tailSway || 0), by - g.tail.c1y],
+    [bx - body.rx + g.tail.base - g.tail.c2 - (p.tailSway || 0), by - g.tail.c2y],
+    g.tail.r, 'W', 'K');
+
+  const bodyMask = host.maskEllipse(bx, by, body.rx, body.ry);
+  for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++)
+    if (y + 0.5 > g.FLOOR) bodyMask[y][x] = false;
+  host.paint(G, bodyMask, 'W', 'K');
+  host.shadeBelow(G, bodyMask, bx, by + body.ry * 0.27, 'H');
+
+  /* ---- the tilted head ---- */
+  const head = g.head;
+  const a = (p.headTilt || 0) * DEG;
+  const skull = host.maskEllipseRot(s.skull[0], s.skull[1], head.rx, head.ry, a);
+  const cheek = host.maskEllipseRot(s.cheek[0], s.cheek[1],
+                                    head.rx * 0.44, head.ry * 0.44, a);
+  const headAll = host.maskOr(skull, cheek);
+  host.paint(G, headAll, 'W', 'K');
+
+  host.paint(G, host.maskTri(s.earL[0][0], s.earL[0][1], s.earL[1][0], s.earL[1][1],
+                             s.earL[2][0], s.earL[2][1]), 'W', 'K');
+  host.paint(G, host.maskTri(s.earR[0][0], s.earR[0][1], s.earR[1][0], s.earR[1][1],
+                             s.earR[2][0], s.earR[2][1]), 'W', 'K');
+  host.px(G, s.pinkL[0], s.pinkL[1], 'P');
+  host.px(G, s.pinkR[0], s.pinkR[1], 'P');
+
+  /* the eye is a ROTATED ellipse, not a block stamped at a rounded
+   * position. A 2x5 block stamped at a rounded point shears as the head
+   * turns; an ellipse in the head's own frame does not, and this is the
+   * one part of the face the eye reads first. */
+  const eyeM = host.maskEllipseRot(s.eye[0], s.eye[1], head.rx * 0.10, head.ry * 0.24, a);
+  for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++)
+    if (eyeM[y][x] && headAll[y][x]) G[y][x] = 'E';
+
+  const pxIn = (x, y, c) => {
+    const xi = Math.round(x), yi = Math.round(y);
+    if (xi < 0 || xi >= host.W || yi < 0 || yi >= host.H) return;
+    if (!headAll[yi][xi]) return;
+    G[yi][xi] = c;
+  };
+  /* the muzzle: nose and mouth, carried on the rotated frame */
+  const nv = s.nose, sk = s.skull;
+  const fwd = [nv[0] - sk[0], nv[1] - sk[1]];
+  pxIn(nv[0], nv[1], 'N');
+  pxIn(nv[0] - fwd[0] * 0.22, nv[1] - fwd[1] * 0.22 + 1.6, 'M');
+  pxIn(nv[0] - fwd[0] * 0.05, nv[1] - fwd[1] * 0.05 + 3.2, 'M');
+
+  host.shadeBelow(G, headAll, s.skull[0], s.skull[1] + head.ry * 0.22, 'H');
+
+  return { rows: G.map(r => r.join('')), solve: s };
+}
+
 module.exports = {
   DEG, makeHost, HOST_32, maskChain,
   GEOM_32, GEOM_64, geomFor, LEG_SPEC, LEG_SPEC_64,
   solveLeg, legMask, rig2Legs, drawFrame, measureStanding,
   lerpPose, walkPose, bentPose, tuckPose, groomPose, solveLegAngles,
-  dirTail, tailChain, tailPose, curvatureProfile, drawTailOnCat, oldPoseAsVector, walkPoseFromOldCycle,
+  dirTail, tailChain, tailPose, curvatureProfile, drawTailOnCat,
+  headSolve, headTiltPose, headDrift, drawHeadOnCat, oldPoseAsVector, walkPoseFromOldCycle,
   footPath, LEG_KEYS, legAt, GAIT, frac
 };
