@@ -1864,7 +1864,7 @@ cells +
 'function cover(name,rows,has){\n' +
 '  var d=document.createElement("div"); d.className="g";\n' +
 '  var l=document.createElement("div"); l.className="lbl";\n' +
-'  l.innerHTML=name.replace("side_","")+" <span class=\\""+(has?"yes":"miss")+"\">"+(has?"&#10003;":"&#10007;")+"</span>";\n' +
+'  l.innerHTML=name.replace("side_","")+" <span class=\\""+(has?"yes":"miss")+"\\">"+(has?"&#10003;":"&#10007;")+"</span>";\n' +
 '  d.appendChild(l); draw(d,rows,2*S); wrap.appendChild(d);\n' +
 '}\n' +
 cover + '\n' +
