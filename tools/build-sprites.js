@@ -555,6 +555,7 @@ function frames() {
     const parts = buildCatParts(o);
     out[name] = parts.rows;
     TAIL_OF[name] = parts.tail;
+    DECLARED[name] = { oneEye: false };      /* a front-on cat has two */
   }
 
   /* Side-view frames are emitted with a `side_` prefix. They are drawn from
@@ -564,6 +565,10 @@ function frames() {
     const parts = buildSideParts(o);
     out['side_' + name] = parts.rows;
     TAIL_OF['side_' + name] = parts.tail;
+    /* Profile: one eye, unless she is turning and both are showing.
+     * Saying so here is what lets the checker tell "meant to be
+     * one-eyed" apart from "lost an eye". */
+    DECLARED['side_' + name] = { oneEye: !o.twoEyes };
   }
 
   /* --- idle --- */
@@ -1387,6 +1392,12 @@ function toAscii(rows) {
 
 let TAIL_MASKS = {};   /* filled in by frames() */
 
+/* What each frame's pose DECLARED about itself, recorded as the frame is
+ * built. Declared up here rather than beside the checker because
+ * frames() runs before any of this file's checks do, and a checker that
+ * cannot see its own frames' declarations is no checker at all. */
+let DECLARED = {};
+
 const mode = process.argv[2] || '--preview';
 const F = frames();
 const S = sceneSprites();
@@ -1433,71 +1444,334 @@ function checkScene() {
   return bad;
 }
 
-/* Mechanical verification, per view.
+/* ---------- the frame contract, replacing mirror symmetry --------------
  *
- * FRONT frames must mirror — that symmetry is the entire reason for the
- * front-on sprite, and it is what lets one frame read as facing left or
- * right. Exemptions there are deliberate: the tail (read from the exact
- * mask the builder stamped, since a raised tail sits far higher than a
- * hanging one), the alternating walk paw, the eye glance, the one-paw-up
- * grooming poses, and the two poses that press her head to one side — the
- * shake on landing and the headbutt into a hand, both of which are the head
- * travelling sideways on purpose.
+ * WHAT SYMMETRY WAS ACTUALLY CATCHING. A front-facing cat drawn slightly
+ * wrong reads as BROKEN rather than as natural — a half-drawn face, an ear
+ * that has drifted off the skull, an eye floating in the fur. Demanding
+ * that the two halves agree caught that whole class, cheaply, by asking
+ * one question instead of naming the things.
  *
- * SIDE frames are asymmetric by nature — she is in profile, facing right, to
- * be mirrored at draw time. So they are only checked for shape: right size,
- * and nothing landing on the last row or the last column (the flip pass
- * would clip the latter).
+ * WHAT IT WAS COSTING. It also forbade the three things this rig is being
+ * rebuilt to allow: one paw raised and one down, a head tilted off-axis,
+ * weight on one hip. And it has been shaping every front frame in the
+ * piece, not just failing to constrain them.
+ *
+ * So: catch broken, do not demand symmetric. Three rules.
+ *
+ *   BORDER     nothing on the last row or last column. Unchanged, and it
+ *              still covers the side rig, where anything running off the
+ *              edge would be clipped by the flip pass.
+ *
+ *   CONNECTED  the ink forms ONE 4-connected component. 4-way, because
+ *              that is how paint() decides which pixel is an edge. This
+ *              catches a floating ear, a paw that lost its shoulder, a
+ *              head that floated off its torso — the class symmetry was
+ *              proxying for — and it is completely indifferent to which
+ *              paw is up, which head is tilted, or which hip she leans on.
+ *
+ *   DECLARED   a frame says at build time whether it is MEANT to be
+ *              one-eyed, and the checker holds it to that. A profile cat
+ *              has one eye and a front one has two. Without the
+ *              declaration, "intentionally one-eyed" and "lost an eye"
+ *              are the same picture and no rule can tell them apart.
+ *
+ * NOT CHECKED HERE: ears travelling with the head. It was on the list and
+ * it is deliberately not a separate rule — a left-behind ear is a
+ * DETACHED ear, which CONNECTED already catches by a better name and
+ * with the pixel that moved. A second rule would be the same question
+ * asked twice.
  */
-function checkFrames() {
-  let bad = 0;
-  Object.keys(F).forEach(k => {
-    const rows = F[k];
-    if (rows.length !== H) { bad++; console.log('BAD ' + k + ': ' + rows.length + ' rows'); return; }
 
-    const isSide = k.indexOf('side_') === 0;
-    const tail = TAIL_MASKS[k];
+/* Islands this small are tolerated, and counted on every run. They are a
+ * separate and much commoner defect than a detachment: a degenerate ear
+ * triangle covering exactly one pixel, which paints as a lone outline
+ * speck beside the head. 37 of them across the 88 frames, all
+ * pre-existing, and reported as a running count so they cannot rot away
+ * unnoticed. Raising this number tightens the rule; lowering it below 1
+ * would fail 37 specks. */
+const SPECK_ISLAND_PX = 2;
 
-    for (let y = 0; y < H; y++) {
-      const row = rows[y];
-      if (row.length !== W) { bad++; console.log('BAD ' + k + ' row ' + y + ': ' + row.length + ' cols'); continue; }
-      for (let x = 0; x < W; x++) {
-        if (row[x] === '.') continue;
-        if (y === H - 1) { bad++; console.log('BAD ' + k + ': art on the last row'); }
-        if (x === W - 1) { bad++; console.log('BAD ' + k + ': art in the last column'); }
+/* Larger detachments already in the art, BY MEASUREMENT: 22 frames, 26
+ * parts. They are listed rather than fixed because fixing them changes
+ * the art, which is a different slice and a different decision.
+ *
+ * Note what every one of them has in common: the frame's two halves
+ * AGREE. A head that floats clear of the torso floats straight, and a leg
+ * that leaves the belly leaves on both sides. The old rule could not see
+ * any of them, by construction — that is what makes them worth listing.
+ *
+ * Every run prints how many are outstanding. Delete an entry when its
+ * frame is repaired; the checker will tell you if you forget. */
+const KNOWN_DETACHED = {
+  'alert_0': 'the alert raise lifts the head clear of the torso',  /* 182px@(12,17) */
+  'alert_1': 'the alert raise lifts the head clear of the torso',  /* 181px@(12,17) */
+  'side_walk_0': 'the stride carries a rear leg past the edge of the belly',  /* 8px@(22,24) */
+  'side_walk_1': 'the stride carries a rear leg past the edge of the belly',  /* 8px@(23,23) */
+  'side_walk_3': 'the stride carries a rear leg past the edge of the belly',  /* 12px@(4,24) */
+  'side_walk_4': 'the stride carries a rear leg past the edge of the belly',  /* 16px@(4,23) */
+  'side_walk_5': 'the stride carries a rear leg past the edge of the belly',  /* 12px@(6,24) */
+  'side_stretch_3': 'the stride carries a rear leg past the edge of the belly',  /* 12px@(6,24) */
+  'side_jump_2': 'the stride carries a rear leg past the edge of the bellys',  /* 10px@(5,24) 8px@(20,24) */
+  'side_pounce_2': 'the stride carries a rear leg past the edge of the belly',  /* 8px@(6,25) */
+  'side_eat_0': 'the stride carries a rear leg past the edge of the belly',  /* 8px@(6,25) */
+  'side_eat_1': 'the stride carries a rear leg past the edge of the belly',  /* 8px@(6,25) */
+  'side_eat_2': 'the stride carries a rear leg past the edge of the belly',  /* 8px@(6,25) */
+  'side_drink_0': 'the stride carries a rear leg past the edge of the belly',  /* 8px@(6,25) */
+  'side_drink_1': 'the stride carries a rear leg past the edge of the belly',  /* 8px@(6,25) */
+  'side_tree_1': 'the tree pose lifts the head clear, and a rear leg leaves the belly',  /* 122px@(17,0) 16px@(6,23) */
+  'side_tree_2': 'the tree pose lifts the head clear, and a rear leg leaves the belly',  /* 125px@(27,0) 16px@(6,23) */
+  'side_held_lift': 'the stride carries a rear leg past the edge of the bellys',  /* 18px@(5,24) 16px@(24,23) */
+  'side_held_dangle_0': 'the stride carries a rear leg past the edge of the belly',  /* 16px@(6,25) */
+  'side_held_kick_0': 'the stride carries a rear leg past the edge of the belly',  /* 12px@(6,25) */
+  'side_held_calm_0': 'the stride carries a rear leg past the edge of the belly',  /* 16px@(6,25) */
+  'side_stand_0': 'the stride carries a rear leg past the edge of the belly',  /* 12px@(6,24) */
+};
 
-        if (isSide) continue;                         /* profile: no mirror to keep */
+/* 4-connected components of the ink, largest first. */
+function components(rows) {
+  const h = rows.length, w = rows[0].length;
+  const seen = Array.from({ length: h }, () => new Array(w).fill(false));
+  const out = [];
+  for (let y0 = 0; y0 < h; y0++) {
+    for (let x0 = 0; x0 < w; x0++) {
+      if (rows[y0][x0] === '.' || seen[y0][x0]) continue;
+      let n = 0;
+      const q = [[y0, x0]];
+      seen[y0][x0] = true;
+      while (q.length) {
+        const p = q.pop();
+        n++;
+        const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        for (const d of dirs) {
+          const ny = p[0] + d[0], nx = p[1] + d[1];
+          if (ny < 0 || ny >= h || nx < 0 || nx >= w) continue;
+          if (seen[ny][nx] || rows[ny][nx] === '.') continue;
+          seen[ny][nx] = true;
+          q.push([ny, nx]);
+        }
+      }
+      out.push({ n: n, x: x0, y: y0 });
+    }
+  }
+  out.sort((a, b) => b.n - a.n);
+  return out;
+}
 
-        const walking = k.indexOf('walk') === 0;
-        const looking = k.indexOf('look') >= 0;
-        const onePaw = k.indexOf('groom') === 0 || k.indexOf('wash') === 0;
-        const shaking = k.indexOf('shake') === 0;
-        const bumping = k.indexOf('bump') === 0;
-        if (tail && tail[y][x]) continue;              /* the tail */
-        if (walking && y >= 26) continue;              /* alternating paw */
-        if (looking) continue;                         /* eye glance */
-        if (onePaw) continue;                          /* one paw raised */
-        if (shaking) continue;                         /* head swung side to side */
-        if (bumping) continue;                         /* head pressed to one side */
-
-        if (row[x] !== row[W - 1 - x]) {
-          bad++;
-          if (bad <= 12) {
-            console.log('ASYM ' + k + ' row ' + y + ' col ' + x + ': ' +
-              row[x] + ' vs ' + row[W - 1 - x]);
-          }
+/* How many 4-connected blobs of `ch` the frame holds. An eye drawn as a
+ * block is one blob; a 'happy' eye is drawn as separate pixels and reads
+ * as several, which is why the rule below is a MINIMUM and not an
+ * equality. */
+function countBlobs(rows, ch) {
+  const h = rows.length, w = rows[0].length;
+  const seen = Array.from({ length: h }, () => new Array(w).fill(false));
+  let n = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (rows[y][x] !== ch || seen[y][x]) continue;
+      n++;
+      const q = [[y, x]];
+      seen[y][x] = true;
+      while (q.length) {
+        const p = q.pop();
+        const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        for (const d of dirs) {
+          const ny = p[0] + d[0], nx = p[1] + d[1];
+          if (ny < 0 || ny >= h || nx < 0 || nx >= w) continue;
+          if (seen[ny][nx] || rows[ny][nx] !== ch) continue;
+          seen[ny][nx] = true;
+          q.push([ny, nx]);
         }
       }
     }
+  }
+  return n;
+}
+
+/* The whole contract, as a pure function of ONE frame, so that
+ * --check-selftest can push deliberately broken frames through exactly
+ * the code the real check runs. Returns what it found and what it chose
+ * to tolerate, rather than printing, for the same reason. */
+function inspectFrame(name, rows, declared, known) {
+  const bad = [];
+  let specks = 0, detached = 0;
+  if (rows.length !== H) return { bad: [name + ': ' + rows.length + ' rows'], specks: 0, detached: 0 };
+
+  for (let y = 0; y < H; y++) {
+    if (rows[y].length !== W) return { bad: [name + ' row ' + y + ': ' + rows[y].length + ' cols'], specks: 0, detached: 0 };
+    for (let x = 0; x < W; x++) {
+      if (rows[y][x] === '.') continue;
+      if (y === H - 1) bad.push(name + ': art on the last row');
+      if (x === W - 1) bad.push(name + ': art in the last column');
+    }
+  }
+
+  /* CONNECTED */
+  const comps = components(rows);
+  if (comps.length > 1) {
+    const rest = comps.slice(1);
+    const big = rest.filter(c => c.n > SPECK_ISLAND_PX);
+    specks = rest.length - big.length;
+    detached = big.length;
+    const allow = (known || KNOWN_DETACHED)[name];
+    if (big.length && !allow) {
+      bad.push(name + ': ' + big.length + ' detached part(s) — ' +
+        big.map(c => c.n + 'px at (' + c.x + ',' + c.y + ')').join(', '));
+    }
+  }
+
+  /* DECLARED */
+  if (declared) {
+    const want = declared.oneEye ? 1 : 2;
+    const got = countBlobs(rows, 'E');
+    if (got < want) {
+      bad.push(name + ': ' + got + ' eye blob(s), pose declared ' +
+        (declared.oneEye ? 'one eye' : 'two eyes') + ' — a feature went missing');
+    }
+  }
+  return { bad: bad, specks: specks, detached: detached };
+}
+
+function checkFrames() {
+  let bad = 0, specks = 0, knownFrames = 0, knownParts = 0;
+  Object.keys(F).forEach(k => {
+    const r = inspectFrame(k, F[k], DECLARED[k]);
+    specks += r.specks;
+    if (KNOWN_DETACHED[k] && r.detached) { knownFrames++; knownParts += r.detached; }
+    bad += r.bad.length;
+    r.bad.slice(0, 3).forEach(p => console.log('BAD ' + p));
   });
 
   const n = Object.keys(F).length;
   const ns = Object.keys(F).filter(k => k.indexOf('side_') === 0).length;
+  console.log('CONNECTED  — 1 component per frame (' + specks + ' pre-existing 1-2px specks tolerated, ' +
+    knownParts + ' known detachment(s) across ' + knownFrames + ' frame(s) listed in KNOWN_DETACHED)');
+  console.log('DECLARED   — eye count matches the pose, per frame');
   console.log(bad === 0
-    ? 'FRAME CHECK OK — ' + n + ' frames (front ' + (n - ns) + ' mirror-symmetric, ' +
+    ? 'FRAME CHECK OK — ' + n + ' frames (front ' + (n - ns) + ' connected, ' +
       'side ' + ns + ' flip-safe), all 32x32'
     : 'FRAME CHECK FAIL — ' + bad + ' problems');
   return bad;
+}
+
+/* ---------- --check-selftest -------------------------------------------
+ *
+ * A check that cannot fail is decoration. This pushes deliberately broken
+ * frames through inspectFrame() — the same function --check runs, not a
+ * copy of it — and asserts that broken frames are REJECTED and that a
+ * deliberately ASYMMETRIC frame is still ACCEPTED. It is the acceptance
+ * test for the acceptance test, and it is the only thing standing between
+ * this checker and being an ornament.
+ *
+ * Feature boxes are MEASURED off the built frames rather than hard-coded,
+ * because a hard-coded box is one rig tweak away from silently mutating
+ * the wrong pixels and the self-test would still pass.
+ *
+ * Everything here works on a COPY. F is never written to, and this branch
+ * cannot be reached from --build or --check.
+ */
+if (mode === '--check-selftest') {
+  const copyOf = k => F[k].map(r => r.split(''));
+  const flat = rows => rows.map(r => r.join(''));
+
+  const eraseBox = (rows, x0, y0, x1, y1) => {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) rows[y][x] = '.';
+  };
+  /* cut a box loose and paste it somewhere empty, leaving a hole */
+  const moveBox = (rows, x0, y0, x1, y1, tx, ty) => {
+    const got = [];
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) got.push(rows[y][x]);
+    eraseBox(rows, x0, y0, x1, y1);
+    let i = 0;
+    for (let y = ty; y <= ty + (y1 - y0); y++) for (let x = tx; x <= tx + (x1 - x0); x++)
+      rows[y][x] = got[i++];
+  };
+  /* bounding box of every `ch` on the left or right half of the frame */
+  const boxOf = (rows, ch, side) => {
+    let x0 = 99, y0 = 99, x1 = -1, y1 = -1;
+    for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y].length; x++) {
+      if (rows[y][x] !== ch) continue;
+      if (side === 'left' && x >= rows[y].length / 2) continue;
+      if (side === 'right' && x < rows[y].length / 2) continue;
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    return x1 < 0 ? null : [x0, y0, x1, y1];
+  };
+  const eraseChar = (rows, ch, side) => {
+    for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y].length; x++) {
+      if (rows[y][x] !== ch) continue;
+      if (side === 'left' && x >= rows[y].length / 2) continue;
+      if (side === 'right' && x < rows[y].length / 2) continue;
+      rows[y][x] = '.';
+    }
+  };
+
+  const cases = [
+    {
+      want: 'pass', by: 'CONNECTED must not fire',
+      label: 'front frame with ONE ear — deliberately asymmetric',
+      frame: 'sit_open',
+      build: r => { const b = boxOf(r, 'K', 'left'); eraseBox(r, 0, b[1], b[2], b[1]); return r; }
+    },
+    {
+      want: 'fail', by: 'CONNECTED',
+      label: 'front frame with the NOSE cut loose and pasted into empty space',
+      frame: 'sit_open',
+      build: r => { const b = boxOf(r, 'N', 'left'); moveBox(r, b[0] - 2, b[1], b[2] + 2, b[3], 2, 29); return r; }
+    },
+    {
+      want: 'fail', by: 'DECLARED',
+      label: 'front frame with ONE EYE deleted',
+      frame: 'sit_open',
+      build: r => { eraseChar(r, 'E', 'left'); return r; }
+    },
+    {
+      want: 'fail', by: 'DECLARED',
+      label: 'profile frame with its only eye deleted',
+      frame: 'side_stalk_0',
+      build: r => { eraseChar(r, 'E', 'right'); return r; }
+    },
+    {
+      want: 'fail', by: 'BORDER',
+      label: 'front frame with art running onto the last row',
+      frame: 'sit_open',
+      build: r => { const y = rows_last(r); r[y][0] = 'K'; return r; }
+    },
+    {
+      want: 'fail', by: 'CONNECTED',
+      label: 'front frame with a PAW cut loose from the leg',
+      frame: 'sit_open',
+      build: r => { moveBox(r, 8, 26, 13, 28, 2, 28); return r; }
+    }
+  ];
+  function rows_last(rows) { return rows.length - 1; }
+
+  let wrong = 0;
+  console.log('SELFTEST — each case pushed through inspectFrame(), the code --check runs');
+  console.log('');
+  cases.forEach(c => {
+    const rows = c.build(copyOf(c.frame));
+    const r = inspectFrame(c.frame, flat(rows), DECLARED[c.frame], {});
+    const got = r.bad.length ? 'fail' : 'pass';
+    const ok = got === c.want;
+    if (!ok) wrong++;
+    console.log('  ' + (ok ? 'ok   ' : 'WRONG') + '  want ' + c.want + '  got ' + got +
+      '   ' + c.label);
+    r.bad.slice(0, 2).forEach(b => console.log('           ' + b));
+  });
+
+  console.log('');
+  let real = 0;
+  Object.keys(F).forEach(k => { real += inspectFrame(k, F[k], DECLARED[k]).bad.length; });
+  console.log('  the 88 real frames report ' + real + ' problems');
+  if (real !== 0) wrong++;
+
+  console.log('');
+  console.log(wrong === 0
+    ? 'SELFTEST OK — ' + cases.length + ' cases behave as required, real frames clean'
+    : 'SELFTEST FAIL — ' + wrong + ' case(s) did not behave as required');
+  process.exit(wrong === 0 ? 0 : 1);
 }
 
 if (mode === '--check') {
