@@ -764,6 +764,19 @@ function frames() {
     legs: { farFront: { x: 20.5 }, nearFront: { x: 23.0 }, farBack: { x: 8.5 }, nearBack: { x: 12.5 } },
     tail: { lift: 0.8, sway: 0.8 }
   }));
+  /* stretch_3: returned to standing still. Every offset stretchA put in is
+   * undone here — spine back to level, head up, forelegs gathered under her,
+   * tail down, eyes open — because stretch_2 is only half eased: her spine is
+   * partway up and her head is still down. Ending the stretch on it meant she
+   * rotated out of a crouch she had never finished leaving, which is what made
+   * the whole beat feel unfinished. The turn anchors on THIS, so it needs to
+   * read as a cat standing still in profile. Same rig fields as stand_0. */
+  side('stretch_3', Object.assign({}, stretchA, {
+    eyes: 'open', earPerk: 0,
+    bodyY: 0, bodyRX: null, bodyRY: null,
+    headDX: 0, headDY: 0,
+    legs: {}, tail: {}
+  }));
 
   /* jump: crouch, tuck, stretch, land (the travel is the state machine's) */
   const tuck = { nearFront: { lift: 3 }, farFront: { lift: 3 }, nearBack: { lift: 3 }, farBack: { lift: 3 } };

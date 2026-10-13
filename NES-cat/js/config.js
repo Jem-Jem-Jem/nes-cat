@@ -181,6 +181,11 @@
        * loaf is a long settle with nothing to do. */
       watchDur: 2.6,
       stretchDur: 1.7,
+      /* the beat between finishing a stretch and turning back to the room. It
+       * exists to be seen: side_stretch_3 is the pose she is actually standing
+       * still in, and it is what the turn pivots from, so it has to land
+       * before the rotation rather than being cut by it. */
+      stretchReleaseDur: 0.4,
       loafDur: 5.5,
       wStretch: 18,
       wLoaf: 14,

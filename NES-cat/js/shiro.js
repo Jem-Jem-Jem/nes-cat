@@ -580,6 +580,25 @@
         },
         update: function (dt, s) {
           if (!self.arrive(dt, self._act.target)) return;
+          if (s.time > self._act.dur) sm.set('stretch_release');
+        }
+      },
+
+      /* stretch_release: the return to standing still, which is the beat the
+       * stretch used to not have.
+       *
+       * endActivity() hands the turn the frame she is *holding* as its anchor,
+       * so ending the stretch on stretch_2 — a half-eased posture, spine
+       * partway up, head still down — meant the turn then held that same
+       * half-crouch for another 40% while she rotated out of it. A posture
+       * that never finishes reads as low fidelity however long it is up. So
+       * the release ends on stretch_3 instead: spine level, head up, and
+       * actually standing still, which is a pose a pivot can start from. */
+      stretch_release: {
+        enter: function () {
+          self._act = { dur: B.stretchReleaseDur };
+        },
+        update: function (dt, s) {
           if (s.time > self._act.dur) self.endActivity();
         }
       },
@@ -1429,7 +1448,7 @@
   Shiro.SIDE_STATES = {
     walk: 1, jump: 1, pounce: 1,
     eat: 1, drink: 1, groom: 1, wash: 1, tree: 1,
-    turn: 1, watch: 1, watchHold: 1, stretch: 1, knead: 1, chase: 1,
+    turn: 1, watch: 1, watchHold: 1, stretch: 1, stretch_release: 1, knead: 1, chase: 1,
     stalk: 1, circle: 1, scratch: 1
   };
 
@@ -1601,6 +1620,10 @@
        * the room over it — so there is no fourth frame to fall through to */
       return 'side_stretch_2';
     }
+
+    /* stretch_release: standing still — always side_stretch_3, so the turn's
+     * anchor is a settled pose and not the half-eased stretch_2 */
+    if (st === 'stretch_release') return 'side_stretch_3';
 
     /* loaf: just breathing, until she decides to unfold */
     if (st === 'loaf') {
