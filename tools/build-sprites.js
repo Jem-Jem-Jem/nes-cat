@@ -1670,6 +1670,213 @@ function checkFrames() {
  * Everything here works on a COPY. F is never written to, and this branch
  * cannot be reached from --build or --check.
  */
+/* ---------- --sheet: the contact sheet --------------------------------
+ *
+ * The one question numbers cannot answer: does the 64x64 art actually
+ * LOOK better than the 32x32 art the game is using? Everything measured
+ * so far says yes and nobody has looked.
+ *
+ * MATCHED DISPLAY SIZE is the whole trick and it is easy to get wrong.
+ * The old art is 32x32, the new is 64x64. Printed at native size the new
+ * cat is twice as big and every comparison is meaningless. So the old
+ * art is drawn 2x — one art pixel becomes a 2x2 block — and the new art
+ * at 1x. Both then occupy the same physical footprint and the only
+ * difference the eye can see is the thing under review.
+ *
+ * This writes a self-contained HTML file to .freebuff/ (gitignored, a
+ * working artefact on purpose) with the sprite data inlined as text. No
+ * build step, no server, no dependencies: canvas 2D is part of the
+ * browser, not a library.
+ */
+if (mode === '--sheet') {
+  const rig2 = require('./rig2.js');
+  const fsx = require('fs');
+  const G = rig2.geomFor(64);
+  const host64 = Object.assign(rig2.makeHost(64, 64), { toAscii: toAscii });
+
+  /* one art pixel of the old art becomes a 2x2 block */
+  const scale2 = rows => {
+    const out = [];
+    for (const r of rows) {
+      const wide = r.split('').map(c => c + c).join('');
+      out.push(wide, wide);
+    }
+    return out;
+  };
+
+  /* the rows the contact sheet pairs up. Each entry is one pose the
+   * game currently has, and what the new rig draws for it. `new: null`
+   * means the new rig cannot express this yet, and saying so on the
+   * sheet is more useful than faking it. */
+  const PAIRS = [
+    /* the walk: six discrete frames on the old rig, six samples of a
+     * continuous pose on the new one. This is the comparison the whole
+     * rig exists for. */
+    { group: 'walk', old: 'side_walk_0', new: () => rig2.drawFrame(rig2.walkPose(0, null, 64), host64, 64).rows },
+    { group: 'walk', old: 'side_walk_1', new: () => rig2.drawFrame(rig2.walkPose(1 / 6, null, 64), host64, 64).rows },
+    { group: 'walk', old: 'side_walk_2', new: () => rig2.drawFrame(rig2.walkPose(2 / 6, null, 64), host64, 64).rows },
+    { group: 'walk', old: 'side_walk_3', new: () => rig2.drawFrame(rig2.walkPose(3 / 6, null, 64), host64, 64).rows },
+    { group: 'walk', old: 'side_walk_4', new: () => rig2.drawFrame(rig2.walkPose(4 / 6, null, 64), host64, 64).rows },
+    { group: 'walk', old: 'side_walk_5', new: () => rig2.drawFrame(rig2.walkPose(5 / 6, null, 64), host64, 64).rows },
+    /* grooming: the paw-at-the-cheek reach the old rig fakes with a
+     * telescoping ellipse. */
+    { group: 'groom', old: 'side_groom_0', new: () => rig2.drawFrame(rig2.groomPose(1, 0, 64), host64, 64).rows },
+    { group: 'groom', old: 'side_wash_0', new: () => rig2.drawFrame(rig2.groomPose(1, 1, 64), host64, 64).rows },
+    /* the segmented tail against a standing cat. */
+    { group: 'tail', old: 'side_stand_0', new: () => rig2.drawTailOnCat(rig2.tailPose(0.0, 64), host64, 64) },
+    { group: 'tail', old: 'side_stand_1', new: () => rig2.drawTailOnCat(rig2.tailPose(0.25, 64), host64, 64) },
+    { group: 'tail', old: 'side_turn_2', new: () => rig2.drawTailOnCat(rig2.tailPose(0.5, 64), host64, 64) },
+    /* head rotation against the frames that come from a turn. */
+    { group: 'head', old: 'side_turn_1', new: () => rig2.drawHeadOnCat({ headTilt: 0 }, host64, 64).rows },
+    { group: 'head', old: 'side_walk_2', new: () => rig2.drawHeadOnCat({ headTilt: 20 }, host64, 64).rows },
+    { group: 'head', old: 'side_stalk_0', new: () => rig2.drawHeadOnCat({ headTilt: -20 }, host64, 64).rows },
+    /* the bent leg, which is the thing slices 1-3 were for. */
+    { group: 'leg', old: 'side_walk_2', new: () => rig2.drawFrame(rig2.bentPose(1, 64), host64, 64).rows }
+  ];
+
+  const asRows = v => (v && v.rows) ? v.rows : v;
+
+  /* ---- coverage: every side frame the CURRENT rig has ---- */
+  const SIDE = Object.keys(F).filter(k => k.indexOf('side_') === 0);
+  const paired = new Set(PAIRS.map(x => x.old));
+  const covered = SIDE.filter(k => paired.has(k));
+
+  console.log('CONTACT SHEET — old 32x32 art at 2x, new 64x64 art at 1x, same footprint');
+  console.log('');
+  console.log('  old art pixel  ->  2x2 block   (32x32 becomes 64x64 of cells)')
+  console.log('  new art        ->  1x1        (64x64 stays 64x64 of cells)');
+  console.log('');
+  console.log('  ' + PAIRS.length + ' paired poses across ' +
+    Object.keys(PAIRS.reduce((a, x) => (a[x.group] = 1, a), {})).length + ' groups');
+  console.log('  coverage: ' + covered.length + ' of the current rig\'s ' + SIDE.length +
+    ' side frames have a new-rig counterpart on this sheet');
+  console.log('  HTML written to .freebuff/contact-sheet.html');
+
+  /* ---- ASCII, in the repo's own --preview format ---- */
+  let group = null;
+  PAIRS.forEach(pair => {
+    if (pair.group !== group) {
+      group = pair.group;
+      console.log('\n\n==== ' + group.toUpperCase() + ' ====');
+    }
+    const oldRows = scale2(F[pair.old]);
+    const newRows = asRows(pair.new());
+    console.log('\n  == ' + pair.old + '  (current rig, 2x)  |  new rig @64 (1x) ==');
+    console.log('  ' + ' '.repeat(4) + 'CURRENT 32x32 art, 2x (one art pixel = 2x2 cells, so');
+    console.log('  ' + ' '.repeat(4) + 'every row below is printed twice)        |  NEW 64x64 art, 1x');
+    console.log('  ' + ' '.repeat(4) + '-'.repeat(64) + '+' + '-'.repeat(64));
+    for (let y = 0; y < 64; y++) {
+      /* label every ART row, not every printed line: the old column is
+       * doubled vertically, so labelling 64 printed lines would label
+       * the same art row twice and make the two columns look
+       * misaligned when they are not. */
+      const lbl = (y % 2 === 0 ? String(y / 2).padStart(2, '0') : '  ');
+      console.log('  ' + lbl + ' ' + oldRows[y] + '|' + newRows[y]);
+    }
+  });
+
+  /* ---- the HTML deliverable ---- */
+  const CHAR = {
+    K: '#212529', W: '#ffffff', H: '#ced4da', G: '#adb5bd', P: '#f7a8c4',
+    N: '#ea7d9e', E: '#212529', B: '#f7a8c4', M: '#495057'
+  };
+  /* A deliberately DARKER background than config.js THEME_BG: THEME_BG is
+     #212529 and so is the outline, so the outline would vanish into it.
+     In the game the cat is drawn on a room, not on THEME_BG, and this is
+     the same situation. */
+  const BG = '#101215';
+
+  const esc = str => str.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const pack = rows => JSON.stringify(rows).replace(/</g, '\\u003c');
+
+  let cells = '';
+  PAIRS.forEach(pair => {
+    cells += 'sec(' + pair.group + ', ' + JSON.stringify(pair.old) + ', ' +
+      pack(scale2(F[pair.old])) + ', ' + pack(asRows(pair.new())) + ');\n';
+  });
+  let cover = '';
+  SIDE.forEach(k => {
+    cover += 'cover(' + JSON.stringify(k) + ', ' + pack(F[k]) + ', ' +
+      (paired.has(k) ? '1' : '0') + ');\n';
+  });
+
+  const html = '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">\n' +
+'<title>NES-cat — contact sheet: current 32x32 art vs new 64x64 art</title>\n' +
+'<style>\n' +
+'  body{background:' + BG + ';color:#ced4da;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;margin:0;padding:28px}\n' +
+'  h1{font-size:19px;color:#fff;margin:0 0 4px}\n' +
+'  h2{font-size:15px;color:#f7a8c4;margin:34px 0 10px;border-bottom:1px solid #343a40;padding-bottom:5px}\n' +
+'  p.note{color:#adb5bd;margin:0 0 20px;max-width:70em}\n' +
+'  canvas{image-rendering:pixelated;image-rendering:crisp-edges;background:' + BG + ';border:1px solid #343a40}\n' +
+'  .cell{display:inline-block;margin:0 18px 18px 0;vertical-align:top}\n' +
+'  .lbl{color:#adb5bd;margin:0 0 5px;font-size:12px}\n' +
+'  .lbl b{color:#fff;font-weight:600}\n' +
+'  .rig{color:#f7a8c4}\n' +
+'  .grid{display:flex;flex-wrap:wrap;gap:14px}\n' +
+'  .g{display:inline-block;text-align:center;margin:0 10px 12px 0}\n' +
+'  .miss{color:#e76e55}\n' +
+'  .yes{color:#92cc41}\n' +
+'</style></head><body>\n' +
+'<h1>NES-cat &mdash; contact sheet</h1>\n' +
+'<p class="note"><b>How to read this.</b> The left column is the art the game uses today, 32x32, drawn <b>2x</b>: one art pixel becomes a 2x2 block. ' +
+'The right column is the new rig at 64x64 drawn <b>1x</b>. Both therefore occupy the same physical footprint on this page, so the size is held constant and the only thing that differs is the drawing. ' +
+'Nothing in the game has changed; no frame has been replaced. This exists so a person can look and decide.</p>\n' +
+'<div id="out"></div>\n' +
+'<script>\n' +
+'var CHAR=' + JSON.stringify(CHAR) + ';\n' +
+'var BG=' + JSON.stringify(BG) + ';\n' +
+'var S=4;                       /* display scale for the new art */\n' +
+'function draw(el,rows,scale){\n' +
+'  var c=document.createElement("canvas");\n' +
+'  c.width=rows[0].length*scale; c.height=rows.length*scale;\n' +
+'  var x=c.getContext("2d");\n' +
+'  x.fillStyle=BG; x.fillRect(0,0,c.width,c.height);\n' +
+'  for(var y=0;y<rows.length;y++){var r=rows[y];\n' +
+'    for(var i=0;i<r.length;i++){var ch=r.charAt(i);\n' +
+'      if(ch===".")continue;\n' +
+'      x.fillStyle=CHAR[ch]||"#ff00ff";\n' +
+'      x.fillRect(i*scale,y*scale,scale,scale);}}\n' +
+'  el.appendChild(c); return c;\n' +
+'}\n' +
+'function cell(parent,label,rows,scale,cls){\n' +
+'  var d=document.createElement("div"); d.className="cell";\n' +
+'  var l=document.createElement("div"); l.className="lbl"; l.innerHTML=label;\n' +
+'  d.appendChild(l); draw(d,rows,scale); parent.appendChild(d);\n' +
+'}\n' +
+'var out=document.getElementById("out"), group=null;\n' +
+'function sec(g,oldName,oldRows,newRows){\n' +
+'  if(g!==group){group=g;\n' +
+'    var h=document.createElement("h2"); h.textContent=g; out.appendChild(h);}\n' +
+'  var d=document.createElement("div"); d.className="grid";\n' +
+'  cell(d,"<b>"+oldName+"</b><br>current rig &middot; 32x32 &middot; <span class=rig>2x</span>",oldRows,2*S);\n' +
+'  cell(d,"<b>new rig</b> &middot; 64x64 &middot; 1x",newRows,S);\n' +
+'  out.appendChild(d);\n' +
+'}\n' +
+cells +
+'sec=sec;\n' +
+'/* coverage: every side frame the current rig has, marked for whether the\n' +
+'   new rig can express it yet */\n' +
+'var h2=document.createElement("h2"); h2.textContent="coverage — every side frame the current rig has (48)"; out.appendChild(h2);\n' +
+'var p=document.createElement("p"); p.className="note";\n' +
+'p.innerHTML="Each is the current 32x32 art at 2x. <span class=yes>green</span> = the new rig has a counterpart on this sheet. <span class=miss>red</span> = the new rig cannot express this yet. The gaps are listed because a contact sheet that hides them is worthless.";\n' +
+'out.appendChild(p);\n' +
+'var wrap=document.createElement("div"); wrap.className="grid";\n' +
+'function cover(name,rows,has){\n' +
+'  var d=document.createElement("div"); d.className="g";\n' +
+'  var l=document.createElement("div"); l.className="lbl";\n' +
+'  l.innerHTML=name.replace("side_","")+" <span class=\\""+(has?"yes":"miss")+"\">"+(has?"&#10003;":"&#10007;")+"</span>";\n' +
+'  d.appendChild(l); draw(d,rows,2*S); wrap.appendChild(d);\n' +
+'}\n' +
+cover + '\n' +
+'out.appendChild(wrap);\n' +
+'</script></body></html>\n';
+
+  fsx.writeFileSync(path.join(__dirname, '..', '.freebuff', 'contact-sheet.html'), html, 'utf8');
+  console.log('');
+  console.log('  HTML written: ' + (html.length / 1024).toFixed(1) + ' KB, self-contained');
+  console.log('  sprite data inlined as text; canvas 2D is the browser, not a dependency');
+}
+
 if (mode === '--check-selftest') {
   const copyOf = k => F[k].map(r => r.split(''));
   const flat = rows => rows.map(r => r.join(''));
