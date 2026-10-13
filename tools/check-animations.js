@@ -137,7 +137,12 @@ const CASES = [
   { state: 'stretch', secs: 3 },
   { state: 'loaf', secs: 7 },
   { state: 'shake', secs: 1.2 },
-  { state: 'alert', secs: 2 },
+  /* alert was decomposed into snap + hold (90d6af5). Both are listed because
+   * a case that names a state the machine does not have is silently skipped,
+   * and then its frames read as orphans — which is the only reason the check
+   * noticed the missing coverage at all. */
+  { state: 'alert_snap', secs: 2, payload: { then: 'alert_hold' } },
+  { state: 'alert_hold', secs: 2 },
   { state: 'knead', secs: 5 },
   { state: 'react', secs: 3, payload: { say: 'pet' } },
   { state: 'walk', secs: 8, payload: { x: 40 } },
