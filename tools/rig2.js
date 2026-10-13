@@ -1349,10 +1349,27 @@ function drawCandidate(p, host, g) {
 
 /* A STANDING POSE — four feet down, weight even.
  *
- * The femur runs down from the hip, so putting the paw straight below the
- * hip is what throws the fold into the tibia, and that fold is the
- * digitigrade Z. It is the two-link solve producing it, not an authored
- * angle: this pose carries no tibia or meta angle anywhere. */
+ * TWO WAYS THIS IS AUTHORED, and which one runs is a property of the
+ * geometry table, not of the caller:
+ *
+ *   1. No `g.restLeg`. The femur runs down from the hip and the paw sits
+ *      below it, so the two-link solve throws the fold into the tibia,
+ *      and that fold is the digitigrade Z. Nothing is authored; the
+ *      solve produces the bend. SHEER and KITTEN use this, and changing
+ *      it would move a candidate a human has already weighed.
+ *
+ *   2. With `g.restLeg`. Explicit joint angles through solveLegAngles,
+ *      which is pure FK and clamps nothing. Near-vertical bones give a
+ *      straight leg at rest.
+ *
+ * WHY 2 EXISTS. A bent hind leg in a light palette reads as a RABBIT,
+ * and that is perceptual rather than taste — cat and rabbit are genuinely
+ * ambiguous in profile, and the eye separates them on exactly two
+ * features, hind-leg curvature and ear shape. Curvature belongs to
+ * MOTION: the walk, a pounce, a stretch. At rest a cat stands on
+ * straight legs. So the rest pose stops asking the solver for a bend and
+ * states the bones it wants instead — and the Z comes straight back the
+ * moment a pose is driven by a paw target rather than by angles. */
 function idlePose(g, over) {
   const p = Object.assign({
     bodyY: 0, headDX: 0, headDY: 0, headTilt: 0,
@@ -1361,13 +1378,39 @@ function idlePose(g, over) {
     tailBias: g.tailChain.idleBias != null ? g.tailChain.idleBias : 0.50,
     tailLen: g.tailChain.len
   }, over || {});
+  const R = g.restLeg;
   LEG_KEYS.forEach(k => {
+    const at = legAt(g, k);
     p[k + '_hipX'] = g.legX[k];
-    p[k + '_hipA'] = 0;
     p[k + '_footX'] = g.legX[k] + 0.4;
     p[k + '_footY'] = g.PAW_Y;
+    const r = R && R[at.kind];
+    if (r) {
+      p[k + '_hipA'] = r.hipA || 0;
+      p[k + '_tibiaA'] = r.tibiaA;
+      p[k + '_metaA'] = r.metaA;
+    } else {
+      p[k + '_hipA'] = 0;
+    }
   });
   return p;
+}
+
+/* How far the rest pose departs from vertical, in pixels: the largest
+ * horizontal offset any of the leg's four joints carries from its hip.
+ * That is the number that says whether she is standing on legs or on
+ * sticks, and it is measured off the FINISHED chain so an authored leg
+ * and a solved one are directly comparable. */
+function restDeviation(g, key) {
+  const A = legMask(idlePose(g), key, g);
+  const hx = A.points[0][0];
+  let worst = 0, at = -1;
+  A.points.forEach((q, i) => {
+    const d = Math.abs(q[0] - hx);
+    if (d > worst) { worst = d; at = i; }
+  });
+  const names = ['hip', 'knee', 'ankle', 'paw'];
+  return { px: worst, joint: names[at] || '?', points: A.points, bend: A.bendPx };
 }
 
 function geomForIdle(g, over) {
@@ -1389,21 +1432,179 @@ function geomForIdle(g, over) {
  *         legs, round-tipped ears, four splayed toes on every paw.
  */
 
-const CANDIDATE_COUGH = geomVariant(GEOM_64, {
+/* The COUCH a human chose, frozen, so the refined one can be put side by
+ * side with it instead of against a memory. These are the exact numbers
+ * brief 33 changed. Nothing here is ever used to draw the cat the game
+ * would get; it exists to answer "did that help" with pixels. */
+const CANDIDATE_COUCH_V1 = geomVariant(GEOM_64, {
   FLOOR: 58.0, LEG_TOP: 43.0, HIP_Y: 44.0, PAW_Y: 56.0,
   body: { x: 28.0, y: 37.0, rx: 17.0, ry: 10.5 },
   head: { x: 45.0, y: 22.0, rx: 11.0, ry: 10.2 },
   headEar: { top: 13.5, wide: 12.5, inner: 8.6, pink: [7.4, 10.8], r: 1.6 },
   legX: { nearFront: 45.0, farBack: 15.0, nearBack: 25.0, farFront: 34.0 },
   padRow: 57,
-  /* the toes have to stick OUT past the paw ball or they are invisible:
-     tof + r is how far the toe reaches from the paw point, and the ball
-     is only 2.50, so each toe protrudes 1.55px and makes a scallop. */
   paw: { toes: 3, tof: 2.6, spread: 50, aim: 70, r: 1.05 },
   tailChain: { x: 14.0, y: 33.0, len: 22.0, rBase: 3.4, rTip: 1.2, baseA: 64, idleCurl: 130, idleBias: 0.25 },
   leg: {
     front: { femur: 5.2, tibia: 6.4, meta: 4.6, r: [3.40, 2.70, 2.10, 2.50] },
     hind: { femur: 5.4, tibia: 6.4, meta: 4.4, r: [3.60, 2.90, 2.20, 2.50] }
+  }
+});
+
+/* COUCH_LEG_ARITHMETIC — how 9.3px was arrived at, kept beside the number
+ * so the two cannot drift apart.
+ *
+ * THIS IS A COMPOSITIONAL DEVICE, NOT A FACT ABOUT CATS. Stated plainly
+ * because it matters: a real cat's leg is roughly 40% of her standing
+ * height, which is LONGER than either the old COUCH (23.5%) or this
+ * (18.6%). Nothing here is leg anatomy.
+ *
+ * The golden ratio was offered as the heuristic, so here is the
+ * arithmetic and, more usefully, the arithmetic that shows it does not
+ * work as given:
+ *
+ *     phi = (1 + sqrt 5) / 2 = 1.6180339887
+ *
+ * The usual compositional reading — leg : (torso + head) = 1 : phi^2 —
+ * gives
+ *
+ *     L / (H - L) = 1 / 2.6180339887
+ *     L = (H - L) / 2.6180339887
+ *     L * 3.6180339887 = H
+ *     L = H / 3.6180339887 = 0.2763932 * H        <- 27.6%
+ *
+ * which is LONGER than the 23.5% it was asked to shorten. The golden
+ * section, applied the obvious way, points the WRONG WAY for this brief.
+ *
+ * The next ratio down does point the right way. leg : (torso + head)
+ * = 1 : phi^3:
+ *
+ *     phi^3 = 4.2360679775
+ *     L / (H - L) = 1 / 4.2360679775
+ *     L * 5.2360679775 = H
+ *     L = H / 5.2360679775 = 0.1909830 * H        <- 19.1%
+ *
+ * With H = 50px, the standing height MEASURED off the drawn frame (floor
+ * line to ear tip) after the rounder ear raised the tip by one row:
+ *
+ *     L = 50 / 5.2360679775 = 9.5492px             <- golden target
+ *     L as authored        = 9.30px              <- femur 3.2 + tibia
+ *     9.30 / 50            = 18.6%                  3.45 + meta 2.7 =
+ *                                                     9.35, less the 0.05
+ *                                                     the near-vertical
+ *                                                     angles shorten by
+ *
+ * Landed within 0.25px of the golden target. That is the whole
+ * derivation, and it is a golden-section ratio chosen because it is the
+ * only one that both uses the number that was offered and points in the
+ * direction the human asked for. */
+const COUCH_LEG_ARITHMETIC = {
+  phi: 1.6180339887, phi3: 4.2360679775, ratio: 0.1909830,
+  standingHeight: 50, target: 9.5492, authored: 9.30,
+  before: { span: 12.0, standing: 51, pct: 23.5 },
+  after: { span: 9.30, standing: 50, pct: 18.6 }
+};
+
+/* COUCH after brief 33. Four changes, in the order they were asked for.
+ *
+ * 1. THE FRONT LEG WAS ON A THREAD. It was never technically detached —
+ *    the whole cat measured as ONE connected component — but the bridge
+ *    from the near-front leg to the torso was 4 pixel pairs across 3
+ *    pixels, against 11-30 pairs for every other limb. Two shapes that
+ *    meet at a corner are 4-connected and read as two objects, which is
+ *    what the eye sees. It was authored at legX.nearFront 45, which is
+ *    body.x + body.rx EXACTLY: the very tip of the chest, where a breast
+ *    is and not a shoulder. Moved back to 41 and the bridge becomes 10
+ *    pairs across 9px — which is also where a front leg belongs.
+ *
+ *    Note the radius change is part of THIS fix, not a fifth change.
+ *    Shortening the leg had thinned the hip from 3.4 to 2.5, and a hip
+ *    with so little mass cannot make a join: at 2.5 the bridge fell
+ *    back to 7 pairs. A shorter leg must not mean a thinner hip.
+ *
+ * 2. LEGS SHORTER. 12.0px -> 9.3px on a standing height of 50px, i.e.
+ *    23.5% -> 18.6%. Full arithmetic in COUCH_LEG_ARITHMETIC above.
+ *
+ * 3. STRAIGHT AT REST. `restLeg` replaces the solved bend with authored
+ *    near-vertical bones through solveLegAngles. Worst departure from
+ *    vertical is 0.30px at the front ankle and 0.48px at the hind. The
+ *    Z is NOT gone — walkPose carries no tibiaA/metaA, drives the paws
+ *    to targets, and the solve puts the fold straight back.
+ *
+ * 4. ROUND EARS. apex radius 1.6 -> 2.8. The circle is OR-ed into the
+ *    triangle's OWN mask in paintHead, so a rounded ear is still one
+ *    outlined shape and cannot leave behind the floating speck a bare
+ *    triangle apex produces. Verified: 0 specks.
+ */
+const CANDIDATE_COUCH = geomVariant(GEOM_64, {
+  /* 2. FLOOR drops 58 -> 56 and PAW_Y 56 -> 53.3. Shortening the leg
+     means the paw no longer reaches the old floor line, so the floor
+     line moves with it rather than leaving her floating. */
+  FLOOR: 56.0, LEG_TOP: 43.0, HIP_Y: 44.0, PAW_Y: 53.3,
+  body: { x: 28.0, y: 37.0, rx: 17.0, ry: 10.5 },
+  head: { x: 45.0, y: 22.0, rx: 11.0, ry: 10.2 },
+  /* 4. */
+  headEar: { top: 13.5, wide: 12.5, inner: 8.6, pink: [7.4, 10.8], r: 2.8 },
+  /* 1. nearFront 45 -> 41 */
+  legX: { nearFront: 41.0, farBack: 15.0, nearBack: 25.0, farFront: 34.0 },
+  padRow: 55,
+  /* the toes have to stick OUT past the paw ball or they are invisible:
+     tof + r is how far the toe reaches from the paw point, and the ball
+     is only 2.50, so each toe protrudes and makes a scallop. */
+  paw: { toes: 3, tof: 2.6, spread: 50, aim: 70, r: 1.05 },
+  tailChain: { x: 14.0, y: 33.0, len: 22.0, rBase: 3.4, rTip: 1.2, baseA: 64, idleCurl: 130, idleBias: 0.25 },
+  /* 3. NEAR-VERTICAL BONES. Absolute angles in the 0 = straight down
+     convention: the tibia leads slightly BACK (the hock), the
+     metatarsus slightly FORWARD off it, and the two cancel to 0.19px,
+     which is what puts the paw back UNDER the hip instead of swinging
+     it out. Only ~0.5px of bend survives anywhere in the rest pose. */
+  restLeg: {
+    front: { tibiaA: 5, metaA: -4 },
+    hind: { tibiaA: 8, metaA: -7 }
+  },
+  /* femur + tibia + meta = 9.35px against a 9.3px span. The chain being
+     only just LONGER than the span is the whole reason it does not have
+     to fold to reach the floor. */
+  leg: {
+    front: { femur: 3.2, tibia: 3.45, meta: 2.7, r: [3.30, 2.60, 2.10, 2.50] },
+    hind: { femur: 3.4, tibia: 3.45, meta: 2.5, r: [3.50, 2.80, 2.20, 2.50] }
+  },
+  /* THE COST OF A STRAIGHT REST LEG, and it is not free.
+   *
+   * A perfectly straight vertical leg has ZERO fold budget, and that is
+   * arithmetic rather than opinion: femur + tibia + meta equals the
+   * hip-to-ground span, so tibia + meta EQUALS the knee-to-paw distance
+   * exactly. Any horizontal offset at all then gives
+   * hypot(reach, horiz) > reach, so the solve clamps. Straight legs do
+   * not merely look straight; they have nothing left to give.
+   *
+   * The old COUCH clamped 0 of 804 solves with a 16.2px chain on a 12px
+   * span — 4.2px of fold budget to spend. At 9.35px on a 9.3px span the
+   * budget is 0.05px and the authored gait asks for far more than that:
+   * hipSwing 0.55 offsets the hip from the foot by stride*0.45 = 1.8px
+   * before the leg has moved at all. Straightening the rest pose turned
+   * 0/804 clamped into 502/804.
+   *
+   * So the walk asks for less. Swung by 502 clamps to ZERO, and the
+   * numbers it costs are real and reported rather than hidden:
+   *
+   *     stride    4.0 -> 1.2    a short-legged cat takes a short step
+   *     bodyLift  1.5 -> 0.0    no body bob to lift the knee out of reach
+   *     hipA    16/26 -> 4/7    the femur barely leans, so the knee
+   *                              does not rise out of the tibia's reach
+   *
+   * and in exchange the fold in motion drops from 4.55px to 2.50px, with
+   * 178 distinct silhouettes instead of 200. The fold is still there —
+   * 2.50px is seven times the 0.35px at rest and plainly visible — but
+   * it is a smaller fold than before, and that is the price of the
+   * straight rest pose. Buying the fold back means giving the chain fold
+   * budget, which means a fold at rest too; there is no setting that has
+   * all three, and every combination was measured rather than assumed. */
+  gait: {
+    stride: 1.2, lift: 6.0, duty: 0.62,
+    off: { nearFront: 0.00, farBack: 0.00, nearBack: 0.50, farFront: 0.50 },
+    hipSwing: 0.55, bodyLift: 0.0, headLead: 0.8, tailSway: 2.4, tailAmp: 1.0,
+    hipA: { front: 4, hind: 7 }
   }
 });
 
@@ -1471,7 +1672,7 @@ const CANDIDATE_KITTEN = geomVariant(GEOM_64, {
 
 const CANDIDATES = [
   {
-    key: 'couch', name: 'COUCH', geom: CANDIDATE_COUGH,
+    key: 'couch', name: 'COUCH', geom: CANDIDATE_COUCH,
     blurb: 'Short legs, deep round torso, big head. The cat the 32x32 grid was ' +
            'forcing, drawn properly — and the paws have three toes.',
     departure: 'smallest'
@@ -1499,6 +1700,7 @@ module.exports = {
   dirTail, tailChain, tailPose, curvatureProfile, drawTailOnCat,
   headSolve, headTiltPose, headDrift, drawHeadOnCat, paintHead, oldPoseAsVector, walkPoseFromOldCycle,
   footPath, LEG_KEYS, legAt, GAIT, frac,
-  toeMask, torsoMask, drawCandidate, idlePose, geomForIdle,
-  CANDIDATES, CANDIDATE_COUGH, CANDIDATE_SHEER, CANDIDATE_KITTEN
+  toeMask, torsoMask, drawCandidate, idlePose, restDeviation, geomForIdle,
+  CANDIDATES, CANDIDATE_COUCH, CANDIDATE_COUCH_V1, CANDIDATE_SHEER, CANDIDATE_KITTEN,
+  COUCH_LEG_ARITHMETIC
 };

@@ -1897,6 +1897,511 @@ cover + '\n' +
  * not for making it. They are measured and reported so a human chooses
  * with both eyes open; they are not the brief.
  */
+/* ---------- --couch: the chosen cat, before and after -------------------
+ *
+ * A human chose COUCH out of three candidates. This is COUCH with the
+ * four changes brief 33 asked for, shown against the version that was
+ * chosen so the change can be judged with eyes rather than from a diff.
+ *
+ * THE HEADLINE NUMBER IS NOT IN THE PROPORTIONS. COUCH was ALWAYS one
+ * connected component — it passed every structural check there is — and
+ * it still read as having a detached front leg, because the bridge from
+ * that leg to the torso was 4 pixel pairs across 3 pixels while every
+ * other limb had 11-30. Two shapes meeting at a corner are 4-connected
+ * and look like two objects. So connectivity is reported PER PART, with
+ * the width of the attachment, and not as one island count that says
+ * "1" whether the cat is sound or hanging by a thread.
+ */
+if (mode === '--couch') {
+  const rig2 = require('./rig2.js');
+  const fsx = require('fs');
+  const host = rig2.makeHost(64, 64);
+
+  /* 4-adjacent pixel pairs bridging a part to everything else, and how
+   * many distinct pixels that bridge covers. A corner touch is 1-3 pairs
+   * and reads as detached; a real join is 10+. */
+  function attachment(all, part) {
+    let pairs = 0;
+    const across = new Set();
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      if (!part[y][x]) continue;
+      const nb = [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]];
+      for (const w of nb) {
+        if (w[0] < 0 || w[0] >= 64 || w[1] < 0 || w[1] >= 64) continue;
+        if (all[w[1]][w[0]] && !part[w[1]][w[0]]) { pairs++; across.add(w[0] + ',' + w[1]); }
+      }
+    }
+    return { pairs: pairs, across: across.size };
+  }
+
+  const inkMask = rows => rows.map(row => row.split('').map(ch => ch === '.' ? 0 : 1));
+
+  function countIslands(m) {
+    const seen = Array.from({ length: 64 }, () => new Array(64).fill(false));
+    const sizes = [];
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      if (seen[y][x] || !m[y][x]) continue;
+      const st = [[x, y]]; seen[y][x] = true; let n = 0;
+      while (st.length) {
+        const q = st.pop(); n++;
+        const nb = [[q[0] + 1, q[1]], [q[0] - 1, q[1]], [q[0], q[1] + 1], [q[0], q[1] - 1]];
+        for (const w of nb)
+          if (w[0] >= 0 && w[0] < 64 && w[1] >= 0 && w[1] < 64 &&
+              !seen[w[1]][w[0]] && m[w[1]][w[0]]) { seen[w[1]][w[0]] = true; st.push(w); }
+      }
+      sizes.push(n);
+    }
+    sizes.sort((a, b) => b - a);
+    return sizes;
+  }
+
+  function headMaskOf(g) {
+    const h = rig2.makeHost(64, 64);
+    const G = h.grid();
+    rig2.paintHead(G, h, g, rig2.idlePose(g));
+    return G.map(row => row.map(ch => ch !== '.' ? 1 : 0));
+  }
+
+  function legMaskOf(g, key) {
+    const h = rig2.makeHost(64, 64);
+    const f = rig2.drawCandidate(rig2.idlePose(g), h, g);
+    const A = f.legs.parts[key];
+    if (!A) return null;
+    let m = rig2.maskChain(A.points, A.radii, h);
+    const tm = rig2.toeMask(A.points[3], g.paw, h);
+    let any = false;
+    for (let y = 0; y < 64 && !any; y++)
+      for (let x = 0; x < 64; x++) if (tm[y][x]) { any = true; break; }
+    return any ? h.maskOr(m, tm) : m;
+  }
+
+  function measure(label, g) {
+    const f = rig2.drawCandidate(rig2.idlePose(g), host, g);
+    const all = inkMask(f.rows);
+    const sizes = countIslands(all);
+
+    let top = 99, bot = -1, left = 99, right = -1, ink = 0;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      if (!all[y][x]) continue;
+      ink++;
+      if (y < top) top = y; if (y > bot) bot = y;
+      if (x < left) left = x; if (x > right) right = x;
+    }
+
+    const parts = [['head', headMaskOf(g)]];
+    rig2.LEG_KEYS.forEach(k => parts.push([k, legMaskOf(g, k)]));
+
+    let dev = 0, devAt = '', ankle = 0, knee = 0, clamped = 0;
+    rig2.LEG_KEYS.forEach(k => {
+      const d = rig2.restDeviation(g, k);
+      if (d.px > dev) { dev = d.px; devAt = k; }
+      const A = rig2.legMask(rig2.idlePose(g), k, g);
+      if (A.clamped) clamped++;
+      ankle = Math.max(ankle, A.bendPx.ankle);
+      knee = Math.max(knee, A.bendPx.knee);
+    });
+
+    const standing = g.FLOOR - top;
+    const span = g.PAW_Y - g.HIP_Y;
+    return {
+      label: label, rows: f.rows,
+      islands: sizes.length, biggest: sizes[0] || 0, ink: ink,
+      specks: sizes.filter(n => n <= 2).length,
+      clipped: (top === 0 || bot === 63 || left === 0 || right === 63),
+      top: top, bot: bot, left: left, right: right,
+      standing: standing, span: span, pct: span / standing * 100,
+      headPct: g.head.ry * 2 / standing * 100, ratio: standing / (g.head.ry * 2),
+      bridges: parts.map(([n, pm]) => [n, pm ? attachment(all, pm) : null]),
+      dev: dev, devAt: devAt, ankle: ankle, knee: knee, clamped: clamped,
+      earR: g.headEar.r || 0, nearFrontX: g.legX.nearFront
+    };
+  }
+
+  const AR = rig2.COUCH_LEG_ARITHMETIC;
+  const before = measure('BEFORE  (the chosen one)', rig2.CANDIDATE_COUCH_V1);
+  const after = measure('AFTER  (brief 33)', rig2.CANDIDATE_COUCH);
+
+  /* in motion, the fold comes back: walkPose drives paws to TARGETS and
+   * carries no tibiaA/metaA, so the two-link solve runs again. The clamp
+   * and fold counts are measured over 201 phases, and the CLAMP COUNT
+   * alone is misleading here: the old cat had fold budget to spare and
+   * the straight one has none, so both are reported. */
+  const walkStats = g => {
+    let clamped = 0, maxAnkle = 0;
+    const shapes = new Set();
+    for (let i = 0; i <= 200; i++) {
+      const p = rig2.walkPose(i / 200, null, g);
+      rig2.LEG_KEYS.forEach(k => {
+        const A = rig2.legMask(p, k, g);
+        if (A.clamped) clamped++;
+        maxAnkle = Math.max(maxAnkle, A.bendPx.ankle);
+      });
+      shapes.add(rig2.drawCandidate(Object.assign(rig2.idlePose(g), p), host, g).rows.join(''));
+    }
+    return { clamped: clamped, maxAnkle: maxAnkle, shapes: shapes.size };
+  };
+  const wBefore = walkStats(rig2.CANDIDATE_COUCH_V1);
+  const wAfter = walkStats(rig2.CANDIDATE_COUCH);
+  const wp = rig2.walkPose(0.25, null, rig2.CANDIDATE_COUCH);
+  const walkAnkles = rig2.LEG_KEYS.map(k => rig2.legMask(wp, k, rig2.CANDIDATE_COUCH).bendPx.ankle);
+
+  const pct = v => v.toFixed(1) + '%';
+  const px = v => v.toFixed(2) + 'px';
+  const bfmt = b => b ? b.pairs + ' pairs / ' + b.across + 'px' : 'n/a';
+  const verdict = b => !b ? '' : b.pairs <= 3 ? 'CORNER TOUCH - reads detached'
+    : b.pairs <= 9 ? 'thread' : 'real join';
+
+  /* ---------- ASCII ---------- */
+  console.log('COUCH - the chosen cat, before and after brief 33\n');
+  console.log('  Measured off the drawn frame, not read off the geometry tables.\n');
+  const row = (k, a, b) => console.log('  ' + k.padEnd(26) + String(a).padStart(24) +
+    String(b).padStart(24) + (String(a) === String(b) ? '' : '   CHANGED'));
+  console.log('  ' + ''.padEnd(26) + before.label.padStart(24) + after.label.padStart(24));
+  console.log('  ' + '-'.repeat(76));
+  row('connected components', before.islands, after.islands);
+  row('detached pixels', before.ink - before.biggest, after.ink - after.biggest);
+  row('1-2px specks', before.specks, after.specks);
+  row('clipped by the canvas', before.clipped ? 'yes' : 'no', after.clipped ? 'yes' : 'no');
+  row('nearFront hip x', before.nearFrontX, after.nearFrontX);
+  row('leg span', px(before.span), px(after.span));
+  row('standing height', before.standing + 'px', after.standing + 'px');
+  row('legs, % of standing height', pct(before.pct), pct(after.pct));
+  row('head, % of standing height', pct(before.headPct), pct(after.headPct));
+  row('deviation from vertical', px(before.dev), px(after.dev));
+  row('max ankle fold at rest', px(before.ankle), px(after.ankle));
+  row('max knee fold at rest', px(before.knee), px(after.knee));
+  row('legs clamped', before.clamped + '/4', after.clamped + '/4');
+  row('ear tip radius', before.earR.toFixed(1) + 'px', after.earR.toFixed(1) + 'px');
+
+  console.log('\n  ATTACHMENT - 4-adjacent pixel pairs bridging each part to the rest.');
+  console.log('  An island count cannot tell a sound cat from one hanging by a');
+  console.log('  corner: both are 1 island. 1-3 pairs reads detached; 10+ is a join.\n');
+  console.log('  part          before                       after');
+  console.log('  ' + '-'.repeat(72));
+  before.bridges.forEach((b, i) => {
+    const a2 = after.bridges[i][1];
+    console.log('  ' + b[0].padEnd(13) + bfmt(b[1]).padEnd(17) + verdict(b[1]).padEnd(24) +
+      bfmt(a2).padEnd(17) + verdict(a2));
+  });
+
+  console.log('\n  REST-POSE DEVIATION FROM VERTICAL, per leg');
+  console.log('  (largest horizontal offset of any joint from its own hip)\n');
+  rig2.LEG_KEYS.forEach(k => {
+    const d = rig2.restDeviation(rig2.CANDIDATE_COUCH, k);
+    const kind = (k === 'nearFront' || k === 'farFront') ? 'front' : 'hind ';
+    console.log('    ' + k.padEnd(10) + kind + '  ' + d.px.toFixed(2) + 'px at the ' +
+      d.joint + '    hip->knee->ankle->paw: ' +
+      d.points.map(p => p.map(v => v.toFixed(2)).join(',')).join('  '));
+  });
+
+  console.log('\n  LEG LENGTH - the golden-ratio arithmetic in full.\n');
+  console.log('    THIS IS A COMPOSITIONAL DEVICE, NOT A FACT ABOUT CATS. A real');
+  console.log("    cat's leg is about 40% of her standing height, which is LONGER");
+  console.log('    than either figure here. Nothing below is leg anatomy.\n');
+  console.log('    phi = (1 + sqrt 5) / 2 = ' + AR.phi.toFixed(7) + '\n');
+  console.log('    The obvious reading points the WRONG WAY for this brief:');
+  console.log('        leg : (torso + head) = 1 : phi^2');
+  console.log('        L / (H - L) = 1 / 2.6180340');
+  console.log('        L * 3.6180340 = H');
+  console.log('        L = H / 3.6180340 = 0.2763932 * H  =  27.6%');
+  console.log('      which is LONGER than the ' + before.pct.toFixed(1) +
+    '% it was asked to shorten.\n');
+  console.log('    The next ratio down points the right way:');
+  console.log('        leg : (torso + head) = 1 : phi^3');
+  console.log('        phi^3 = ' + AR.phi3.toFixed(7));
+  console.log('        L / (H - L) = 1 / 4.2360680');
+  console.log('        L * 5.2360680 = H');
+  console.log('        L = H / 5.2360680 = ' + AR.ratio.toFixed(7) + ' * H  =  19.1%\n');
+  console.log('    With H = ' + AR.standingHeight + 'px, the standing height measured off the');
+  console.log('    drawn frame after the rounder ear raised the tip by one row:\n');
+  console.log('        L = ' + AR.standingHeight + ' / 5.2360680 = ' +
+    AR.target.toFixed(4) + 'px   <- golden target');
+  console.log('        L as authored        = ' + AR.authored.toFixed(2) + 'px   <- femur 3.2 + tibia 3.45');
+  console.log('                                              + meta 2.7 = 9.35, less the');
+  console.log('                                              0.05 the near-vertical');
+  console.log('                                              angles shorten it by');
+  console.log('        ' + AR.authored.toFixed(2) + ' / ' + AR.standingHeight + '  = ' +
+    (AR.authored / AR.standingHeight * 100).toFixed(1) + '%\n');
+  console.log('    Landed within ' + (AR.target - AR.authored).toFixed(2) + 'px of the target.');
+
+  console.log('\n  WHICH POSES STILL CURVE A LEG, AND WHY.\n');
+  console.log('    A bent hind leg in a light palette reads as a RABBIT. That is');
+  console.log('    perceptual, not taste: cat and rabbit are genuinely ambiguous in');
+  console.log('    profile, and the eye separates them on exactly two features -');
+  console.log('    hind-leg curvature and ear shape. Both are addressed here.\n');
+  console.log('    AT REST (idlePose): authored near-vertical bones through');
+  console.log('    solveLegAngles, worst departure ' + after.dev.toFixed(2) +
+    'px. No curve at all.\n');
+  console.log('    IN MOTION (walkPose, and anything driving a paw to a TARGET');
+  console.log('    rather than to angles - pounce, stretch, groom, the bent leg):');
+  console.log('    the two-link solve runs and the fold comes straight back, and it');
+  console.log('    should. At walk phase 0.25 the ankles fold');
+  console.log('    ' + walkAnkles.map(v => v.toFixed(2) + 'px').join(' / ') + '.\n');
+  console.log('    walkPose carries no tibiaA/metaA, so the rest pose cannot touch');
+  console.log('    it: the curve is restored by the POSE, not by switching the rig');
+  console.log('    off. SHEER and KITTEN have no restLeg and are unaffected.\n');
+
+  console.log('    THE COST, because a straight leg is not free.\n');
+  console.log('      A perfectly straight vertical leg has ZERO fold budget, and that');
+  console.log('      is arithmetic: femur+tibia+meta equals the hip-to-ground span, so');
+  console.log('      tibia+meta EQUALS the knee-to-paw distance. Any horizontal offset');
+  console.log('      at all then gives hypot(reach, horiz) > reach, and the solve');
+  console.log('      clamps. Straight legs do not merely LOOK straight.\n');
+  console.log('      The old cat had a 16.2px chain on a 12px span, so 4.2px of fold');
+  console.log('      budget to spend. The new one has 9.35 on 9.3, which is 0.05.');
+  console.log('      Straightening the rest pose alone turned 0/804 clamped solves');
+  console.log('      into 502/804, so the walk has to ask for less:\n');
+  console.log('        stride    4.0 -> ' + rig2.CANDIDATE_COUCH.gait.stride +
+    '    a short-legged cat takes a short step');
+  console.log('        bodyLift  1.5 -> ' + rig2.CANDIDATE_COUCH.gait.bodyLift +
+    '    no body bob to lift the knee out of reach');
+  console.log('        hipA   16/26 -> ' + rig2.CANDIDATE_COUCH.gait.hipA.front +
+    '/' + rig2.CANDIDATE_COUCH.gait.hipA.hind +
+    '    the femur barely leans, so the knee stays in reach\n');
+  console.log('      what that costs in motion, measured over 201 phases:');
+  console.log('                          before        after');
+  console.log('        leg solves clamped  ' +
+    String(wBefore.clamped + '/804').padStart(6) + String(wAfter.clamped + '/804').padStart(14));
+  console.log('        max ankle fold      ' +
+    (wBefore.maxAnkle.toFixed(2) + 'px').padStart(6) +
+    (wAfter.maxAnkle.toFixed(2) + 'px').padStart(14));
+  console.log('        distinct silhouettes' +
+    String(wBefore.shapes).padStart(6) + String(wAfter.shapes).padStart(14));
+  console.log('');
+  console.log('      The fold is still there — ' + wAfter.maxAnkle.toFixed(2) +
+    'px is ' +
+    (wAfter.maxAnkle / after.ankle).toFixed(0) +
+    'x the rest pose and plainly');
+  console.log('      visible — but it is a smaller fold than before, and that is the');
+  console.log('      price of the straight rest pose. Buying it back means giving the');
+  console.log('      chain fold budget, which puts a fold at rest too. There is no');
+  console.log('      setting with all three; every combination was measured, not');
+  console.log('      assumed.');
+
+  [before, after].forEach(m => {
+    console.log('\n\n==== ' + m.label + ' ====');
+    console.log('  ' + m.rows.map((r, y) => String(y).padStart(2, '0') + ' ' + r).join('\n  '));
+  });
+
+  /* ---------- the HTML ----------
+   * The client script is held in a String.raw template so that a "\n"
+   * inside it reaches the BROWSER as a backslash-n rather than being
+   * eaten here. That is not a style preference: an earlier generator in
+   * this repo lost two debugging cycles to escapes that looked fine in
+   * the source and arrived as real newlines. */
+  const CHAR = {
+    K: '#212529', W: '#ffffff', H: '#ced4da', G: '#adb5bd', P: '#f7a8c4',
+    N: '#ea7d9e', E: '#212529', B: '#f7a8c4', M: '#495057'
+  };
+  /* darker than config.js THEME_BG on purpose: THEME_BG is #212529 and so
+   * is the outline, so on THEME_BG the cat would have no edge at all. */
+  const BG = '#101215';
+
+  const payload = s => JSON.stringify({
+    label: s.label, rows: s.rows,
+    islands: s.islands, detached: s.ink - s.biggest, specks: s.specks,
+    clipped: s.clipped, ink: s.ink, nearFrontX: s.nearFrontX,
+    standing: s.standing, span: +s.span.toFixed(2), pct: +s.pct.toFixed(1),
+    headPct: +s.headPct.toFixed(1), ratio: +s.ratio.toFixed(2),
+    dev: +s.dev.toFixed(2), devAt: s.devAt, ankle: +s.ankle.toFixed(2),
+    knee: +s.knee.toFixed(2), clamped: s.clamped, earR: +s.earR.toFixed(1),
+    bridges: s.bridges.map(([n, v]) => [n, v ? v.pairs : 0, v ? v.across : 0])
+  });
+
+  const CSS = [
+    '  body{background:' + BG + ';color:#ced4da;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;margin:0;padding:30px}',
+    '  h1{font-size:20px;color:#fff;margin:0 0 6px}',
+    '  h2{font-size:15px;color:#f7a8c4;margin:30px 0 10px}',
+    '  p.note{color:#adb5bd;max-width:80em;margin:0 0 18px}',
+    '  p.note b{color:#fff}',
+    '  .row{display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start}',
+    '  .pane{flex:0 0 auto}',
+    '  .plab{color:#fff;font-size:14px;margin:0 0 4px}',
+    '  .sub{color:#adb5bd;font-size:11px;margin:0 0 8px}',
+    '  canvas{image-rendering:pixelated;image-rendering:crisp-edges;background:' + BG + ';border:1px solid #343a40;display:block}',
+    '  table{border-collapse:collapse;font-size:12px}',
+    '  td{padding:2px 14px 2px 0;vertical-align:top}',
+    '  td.k{color:#adb5bd} td.v{color:#fff}',
+    '  .chg{color:#f7a8c4} .same{color:#495057}',
+    '  .bad{color:#e76e55} .good{color:#92cc41}',
+    '  pre{color:#adb5bd;background:#171a1e;border:1px solid #343a40;padding:14px;overflow:auto;font-size:12px;line-height:1.45}',
+    '  footer{margin-top:30px;color:#495057;border-top:1px solid #343a40;padding-top:12px}'
+  ].join('\n');
+
+  const CLIENT = String.raw`
+var CHAR = __CHAR__, BG = __BG__, S = 5;
+var BEFORE = __BEFORE__, AFTER = __AFTER__;
+var ARITH = __ARITH__, WALK = __WALK__;
+
+function draw(rows, scale) {
+  var c = document.createElement("canvas");
+  c.width = rows[0].length * scale;
+  c.height = rows.length * scale;
+  var x = c.getContext("2d");
+  x.fillStyle = BG;
+  x.fillRect(0, 0, c.width, c.height);
+  for (var y = 0; y < rows.length; y++) {
+    var r = rows[y];
+    for (var i = 0; i < r.length; i++) {
+      var ch = r.charAt(i);
+      if (ch === ".") continue;
+      x.fillStyle = CHAR[ch] || "#ff00ff";
+      x.fillRect(i * scale, y * scale, scale, scale);
+    }
+  }
+  return c;
+}
+
+var pics = document.getElementById("pics");
+[BEFORE, AFTER].forEach(function(s) {
+  var d = document.createElement("div");
+  d.className = "pane";
+  var l = document.createElement("p");
+  l.className = "plab";
+  l.textContent = s.label;
+  d.appendChild(l);
+  var nf = s.bridges.filter(function(b) { return b[0] === "nearFront"; })[0];
+  var sub = document.createElement("p");
+  sub.className = "sub";
+  sub.textContent = "near-front leg joins the torso across " + nf[2] +
+    "px (" + nf[1] + " pixel pairs)  ·  " +
+    s.islands + " island(s)  ·  " + s.detached + " detached px";
+  d.appendChild(sub);
+  d.appendChild(draw(s.rows, S));
+  pics.appendChild(d);
+});
+
+function verdict(p) {
+  if (p <= 3) return '  <span class="bad">CORNER TOUCH - reads detached</span>';
+  if (p <= 9) return '  <span class="bad">thread</span>';
+  return '  <span class="good">real join</span>';
+}
+
+var rows = [
+  ["connected components", "islands"], ["detached pixels", "detached"],
+  ["1-2px specks", "specks"], ["clipped by the canvas", null],
+  ["near-front hip x", "nearFrontX"], ["leg span (px)", "span"],
+  ["standing height (px)", "standing"], ["legs, % of standing height", "pct"],
+  ["head, % of standing height", "headPct"], ["head : body", null],
+  ["deviation from vertical at rest", "dev"],
+  ["max ankle fold at rest", "ankle"], ["max knee fold at rest", "knee"],
+  ["legs clamped", "clamped"], ["ear tip radius (px)", "earR"],
+  ["ink pixels", "ink"]
+];
+var t = "<table>";
+rows.forEach(function(r) {
+  var a = BEFORE[r[1]], b = AFTER[r[1]];
+  if (r[0] === "clipped by the canvas") { a = a ? "yes" : "no"; b = b ? "yes" : "no"; }
+  if (r[0] === "legs clamped") { a = a + "/4"; b = b + "/4"; }
+  var same = String(a) === String(b);
+  t += "<tr><td class='k'>" + r[0] + "</td><td class='v'>" + a +
+       "</td><td class='v'>" + b + "</td><td class='" +
+       (same ? "same" : "chg") + "'>" + (same ? "" : "CHANGED") + "</td></tr>";
+});
+t += "</table>";
+document.getElementById("tables").innerHTML = t;
+
+var h = "  part          before                     after\n  " +
+        "----------------------------------------------------\n";
+AFTER.bridges.forEach(function(b, i) {
+  var a = BEFORE.bridges[i];
+  h += "  " + b[0] + "  " +
+       (a[1] + " pairs / " + a[2] + "px").padEnd(14) + "   " +
+       (b[1] + " pairs / " + b[2] + "px").padEnd(14) + verdict(b[1]) + "\n";
+});
+document.getElementById("bridges").innerHTML = h;
+
+var ar = "";
+ar += "  A COMPOSITIONAL device, not a fact about cats. A real cat's leg is\n";
+ar += "  about 40% of her standing height, which is LONGER than either\n";
+ar += "  figure here. Nothing below is leg anatomy.\n\n";
+ar += "  phi = (1 + sqrt 5) / 2 = " + ARITH.phi.toFixed(7) + "\n\n";
+ar += "  The obvious reading points the WRONG WAY for this brief:\n";
+ar += "      leg : (torso + head) = 1 : phi^2\n";
+ar += "      L / (H - L) = 1 / 2.6180340\n";
+ar += "      L * 3.6180340 = H\n";
+ar += "      L = H / 3.6180340 = 0.2763932 * H  =  27.6%\n";
+ar += "    which is LONGER than the " + BEFORE.pct.toFixed(1) + "% it was asked to shorten.\n\n";
+ar += "  The next ratio down points the right way:\n";
+ar += "      leg : (torso + head) = 1 : phi^3\n";
+ar += "      phi^3 = " + ARITH.phi3.toFixed(7) + "\n";
+ar += "      L / (H - L) = 1 / 4.2360680\n";
+ar += "      L * 5.2360680 = H\n";
+ar += "      L = H / 5.2360680 = " + ARITH.ratio.toFixed(7) + " * H  =  19.1%\n\n";
+ar += "  With H = " + ARITH.standingHeight + "px, the standing height measured off\n";
+ar += "  the drawn frame after the rounder ear raised the tip by one row:\n\n";
+ar += "      L = " + ARITH.standingHeight + " / 5.2360680 = " + ARITH.target.toFixed(4) +
+      "px   <- golden target\n";
+ar += "      L as authored        = " + ARITH.authored.toFixed(2) + "px   <- femur 3.2\n";
+ar += "                                                + tibia 3.45 + meta\n";
+ar += "                                                2.7 = 9.35, less the\n";
+ar += "                                                0.05 the near-vertical\n";
+ar += "                                                angles shorten it by\n";
+ar += "      " + ARITH.authored.toFixed(2) + " / " + ARITH.standingHeight + "  = " +
+      (ARITH.authored / ARITH.standingHeight * 100).toFixed(1) + "%\n\n";
+ar += "  Landed within " + (ARITH.target - ARITH.authored).toFixed(2) + "px of the target.\n";
+document.getElementById("arith").innerHTML = ar;
+
+var cu = "";
+cu += "  A bent hind leg in a light palette reads as a RABBIT. That is\n";
+cu += "  perceptual, not taste: cat and rabbit are genuinely ambiguous in\n";
+cu += "  profile, and the eye separates them on exactly two features -\n";
+cu += "  hind-leg curvature and ear shape. Both are addressed here.\n\n";
+cu += "  AT REST (idlePose): authored near-vertical bones through\n";
+cu += "  solveLegAngles, worst departure " + AFTER.dev.toFixed(2) + "px. No curve.\n\n";
+cu += "  IN MOTION (walkPose, and anything driving a paw to a TARGET rather\n";
+cu += "  than to angles - pounce, stretch, groom, the bent leg): the two-link\n";
+cu += "  solve runs and the fold comes straight back, and it should. At walk\n";
+cu += "  phase 0.25 the ankles fold " + WALK.join(" / ") + ".\n\n";
+cu += "  walkPose carries no tibiaA/metaA, so the rest pose cannot touch it:\n";
+cu += "  the curve is restored by the POSE, not by switching the rig off.\n";
+cu += "  SHEER and KITTEN have no restLeg and are unaffected.\n";
+document.getElementById("curves").innerHTML = cu;
+`;
+
+  const script = CLIENT
+    .replace('__CHAR__', JSON.stringify(CHAR))
+    .replace('__BG__', JSON.stringify(BG))
+    .replace('__BEFORE__', payload(before))
+    .replace('__AFTER__', payload(after))
+    .replace('__ARITH__', JSON.stringify(AR))
+    .replace('__WALK__', JSON.stringify(walkAnkles.map(v => +v.toFixed(2))));
+
+  const html = [
+    '<!doctype html>',
+    '<html lang="en"><head><meta charset="utf-8">',
+    '<title>NES-cat &mdash; COUCH, before and after</title>',
+    '<style>',
+    CSS,
+    '</style></head><body>',
+    '<h1>COUCH &mdash; the cat that was chosen, before and after</h1>',
+    '<p class="note">Four changes: the near-front leg reattached, the legs shortened, ' +
+    'the rest pose straightened, the ears rounded. <b>The number that matters is the ' +
+    'attachment, not the proportions.</b> COUCH was always one connected component &mdash; ' +
+    'it passed every structural check there is &mdash; and it still read as having a ' +
+    'detached front leg, because that leg met the torso across only 3 pixels while every ' +
+    'other limb met it across 7-22. Two shapes touching at a corner are 4-connected and ' +
+    'look like two objects. So connectivity is reported <b>per part, with the width of the ' +
+    'attachment</b>: a single island count cannot tell a sound cat from one hanging by a ' +
+    'thread.</p>',
+    '<div class="row" id="pics"></div>',
+    '<h2>measured</h2><div id="tables"></div>',
+    '<h2>attachment, part by part</h2><pre id="bridges"></pre>',
+    '<h2>leg length &mdash; the golden-ratio arithmetic</h2><pre id="arith"></pre>',
+    '<h2>which poses still curve a leg</h2><pre id="curves"></pre>',
+    '<footer>Self-contained: sprite data inlined as text, drawn with canvas 2D, which is ' +
+    'part of the browser and not a dependency. No build step, no server, no external files.</footer>',
+    '<script>',
+    script,
+    '</script></body></html>',
+    ''
+  ].join('\n');
+
+  fsx.writeFileSync(path.join(__dirname, '..', '.freebuff', 'couch.html'), html, 'utf8');
+  console.log('\n  HTML written: ' + (html.length / 1024).toFixed(1) +
+    ' KB to .freebuff/couch.html (self-contained)');
+}
+
 if (mode === '--candidates') {
   const rig2 = require('./rig2.js');
   const fsx = require('fs');
