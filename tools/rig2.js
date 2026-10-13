@@ -316,9 +316,39 @@ const GEOM_64 = {
            headDY1: 4.0, headDY2: 2.5, headDX1: -3.0, headDX2: -5.0, tailSway: 4.0 }
 };
 
+/* `size` is a number today, and stays behaving like one. It may ALSO be a
+ * geometry table, in which case it is used as given — that is how a
+ * candidate silhouette is driven through this same rig instead of
+ * needing a second copy of every function here. A table is recognised by
+ * being an object, and geomFor(32)/geomFor(64)/geomFor() are untouched,
+ * so nothing existing can reach the new branch. */
 function geomFor(size) {
   if (!size) return GEOM_32;
+  if (typeof size === 'object') return size;
   return Number(size) >= 64 ? GEOM_64 : GEOM_32;
+}
+
+/* Clone a geometry table with overrides, one level deep. Used to derive a
+ * candidate from the cat that already exists, so a candidate only has to
+ * state what it CHANGES and inherits the rest — which is what keeps a
+ * candidate from silently dropping a rig feature by forgetting to restate
+ * it. */
+function geomVariant(base, over) {
+  const g = Object.assign({}, base, over);
+  if (over && over.headEar) g.headEar = Object.assign({}, base.headEar, over.headEar);
+  if (over && over.tailChain) g.tailChain = Object.assign({}, base.tailChain, over.tailChain);
+  if (over && over.gait) g.gait = Object.assign({}, base.gait, over.gait);
+  if (over && over.leg) {
+    g.leg = {
+      front: Object.assign({}, base.leg.front, over.leg.front),
+      hind: Object.assign({}, base.leg.hind, over.leg.hind)
+    };
+  }
+  if (over && over.body) g.body = Object.assign({}, base.body, over.body);
+  if (over && over.head) g.head = Object.assign({}, base.head, over.head);
+  if (over && over.headPivot) g.headPivot = Object.assign({}, base.headPivot, over.headPivot);
+  if (over && over.headTiltRange) g.headTiltRange = Object.assign({}, base.headTiltRange, over.headTiltRange);
+  return g;
 }
 
 /* the 32 leg spec, kept under its old name for slice 1's callers */
@@ -1069,6 +1099,13 @@ function headSolve(p, g) {
     cheek: rot(head.rx * 0.62, head.ry * 0.29),
     earL: tri([[-head.rx * 0.77, -head.ry * 0.62], [-E.wide, -E.top], [-head.rx * 0.10, -head.ry * 0.91]]),
     earR: tri([[head.rx * 0.37, -head.ry * 0.73], [E.wide * 0.90, -E.top * 0.98], [head.rx * 0.90, -head.ry * 0.65]]),
+    /* The ear APEX, already rotated, so a rounded tip can be OR-ed onto
+     * the triangle without the draw code having to know how the ear was
+     * built. `earRnd` is the radius and is ABSENT on every geometry that
+     * shipped, so those triangles stay exactly the triangles they were. */
+    earApexL: rot(-E.wide, -E.top),
+    earApexR: rot(E.wide * 0.90, -E.top * 0.98),
+    earRnd: E.r || 0,
     pinkL: rot(-E.pink[0], -E.pink[1]),
     pinkR: rot(E.pink[1], -E.pink[1] - 0.2),
     eye: rot(head.rx * 0.10, -head.ry * 0.18),
@@ -1107,28 +1144,18 @@ function headDrift(deg, size) {
  * (x + 0.5) pixel convention as everything else — only the pivot
  * changes. Kept separate from drawFrame so a tilt is a preview and can
  * never reach the frames a frame build emits. */
-function drawHeadOnCat(p, host, size) {
-  const g = geomFor(size);
-  host = host || makeHost(g.size, g.size);
-  const G = host.grid();
-  const body = g.body;
-  const bx = body.x, by = body.y + (p.bodyY || 0);
-  const s = headSolve(p, g);
-
-  host.stampCurve(G,
-    [bx - body.rx + g.tail.base, by - g.tail.from],
-    [bx - body.rx + g.tail.base - g.tail.c1 - (p.tailSway || 0), by - g.tail.c1y],
-    [bx - body.rx + g.tail.base - g.tail.c2 - (p.tailSway || 0), by - g.tail.c2y],
-    g.tail.r, 'W', 'K');
-
-  const bodyMask = host.maskEllipse(bx, by, body.rx, body.ry);
-  for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++)
-    if (y + 0.5 > g.FLOOR) bodyMask[y][x] = false;
-  host.paint(G, bodyMask, 'W', 'K');
-  host.shadeBelow(G, bodyMask, bx, by + body.ry * 0.27, 'H');
-
-  /* ---- the tilted head ---- */
+/* ---- the head, painted onto G ----
+ *
+ * Extracted from drawHeadOnCat so a candidate silhouette paints its head
+ * with THIS function and not with a second copy. A duplicate of the face
+ * would rot the moment the eye, the muzzle or the ear changed, and the
+ * candidate's head would quietly stop being the rotatable one. The draw
+ * path is one function called from two places; the behaviour is unchanged
+ * and is verified by diffing drawHeadOnCat's rows before and after.
+ */
+function paintHead(G, host, g, p) {
   const head = g.head;
+  const s = headSolve(p, g);
   const a = (p.headTilt || 0) * DEG;
   const skull = host.maskEllipseRot(s.skull[0], s.skull[1], head.rx, head.ry, a);
   const cheek = host.maskEllipseRot(s.cheek[0], s.cheek[1],
@@ -1136,10 +1163,19 @@ function drawHeadOnCat(p, host, size) {
   const headAll = host.maskOr(skull, cheek);
   host.paint(G, headAll, 'W', 'K');
 
-  host.paint(G, host.maskTri(s.earL[0][0], s.earL[0][1], s.earL[1][0], s.earL[1][1],
-                             s.earL[2][0], s.earL[2][1]), 'W', 'K');
-  host.paint(G, host.maskTri(s.earR[0][0], s.earR[0][1], s.earR[1][0], s.earR[1][1],
-                             s.earR[2][0], s.earR[2][1]), 'W', 'K');
+  const earL = host.maskTri(s.earL[0][0], s.earL[0][1], s.earL[1][0], s.earL[1][1],
+                            s.earL[2][0], s.earL[2][1]);
+  const earR = host.maskTri(s.earR[0][0], s.earR[0][1], s.earR[1][0], s.earR[1][1],
+                            s.earR[2][0], s.earR[2][1]);
+  /* a rounded tip is OR-ed into the SAME mask the triangle is, so the
+   * ear is one shape with one outline rather than a triangle with a
+   * circle sitting on it wearing its own outline */
+  host.paint(G, s.earRnd
+    ? host.maskOr(earL, host.maskEllipse(s.earApexL[0], s.earApexL[1], s.earRnd, s.earRnd))
+    : earL, 'W', 'K');
+  host.paint(G, s.earRnd
+    ? host.maskOr(earR, host.maskEllipse(s.earApexR[0], s.earApexR[1], s.earRnd, s.earRnd))
+    : earR, 'W', 'K');
   host.px(G, s.pinkL[0], s.pinkL[1], 'P');
   host.px(G, s.pinkR[0], s.pinkR[1], 'P');
 
@@ -1166,15 +1202,303 @@ function drawHeadOnCat(p, host, size) {
 
   host.shadeBelow(G, headAll, s.skull[0], s.skull[1] + head.ry * 0.22, 'H');
 
+  return s;
+}
+
+function drawHeadOnCat(p, host, size) {
+  const g = geomFor(size);
+  host = host || makeHost(g.size, g.size);
+  const G = host.grid();
+  const body = g.body;
+  const bx = body.x, by = body.y + (p.bodyY || 0);
+
+  host.stampCurve(G,
+    [bx - body.rx + g.tail.base, by - g.tail.from],
+    [bx - body.rx + g.tail.base - g.tail.c1 - (p.tailSway || 0), by - g.tail.c1y],
+    [bx - body.rx + g.tail.base - g.tail.c2 - (p.tailSway || 0), by - g.tail.c2y],
+    g.tail.r, 'W', 'K');
+
+  const bodyMask = host.maskEllipse(bx, by, body.rx, body.ry);
+  for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++)
+    if (y + 0.5 > g.FLOOR) bodyMask[y][x] = false;
+  host.paint(G, bodyMask, 'W', 'K');
+  host.shadeBelow(G, bodyMask, bx, by + body.ry * 0.27, 'H');
+
+  const s = paintHead(G, host, g, p);
   return { rows: G.map(r => r.join('')), solve: s };
 }
 
+/* ---------- 7. candidate silhouettes ------------------------------------
+ *
+ * A CANDIDATE IS A GEOMETRY TABLE, NOT A NEW RIG.
+ *
+ * That is the whole design, and it is why a candidate cannot quietly
+ * lose a feature. Everything below reaches the leg solve through
+ * rig2Legs, the tail through tailChain and the head through paintHead —
+ * the same three functions the shipped cat is drawn with. An articulated
+ * leg, a segmented tail and a rotatable head are not things a candidate
+ * has or lacks; they are the only way anything in this file gets drawn.
+ *
+ * THE TWO FREEDOMS THE 32 GRID DID NOT HAVE.
+ *
+ * The 32x32 cat is round because 32x32 demands it: a paw with three toes
+ * needs pixels that were spent on the outline, an ear needs enough of them
+ * to read as an ear rather than as a spike, and any silhouette that is not
+ * chunky enough disappears at that size. Those were the grid talking, not
+ * taste. So here:
+ *
+ *   - the torso is not obliged to be ONE ellipse. `torso.lobes` OR-s a set
+ *     of them into one mask and paints it once, so a deep chest, a tucked
+ *     waist and a haunch make ONE outlined shape with a real dip in the
+ *     back and a real tuck above the belly. A single cloud cannot do that
+ *     at any resolution; it was never a resolution problem.
+ *   - the paw is not obliged to be a ball. `paw.toes` adds N circles
+ *     fanned around the end of the chain, OR-ed into the leg's OWN mask so
+ *     the foot is one outlined shape and not a leg wearing studs.
+ *
+ * Everything else — leg lengths and radii, head size, ear size, tail —
+ * is just different numbers, because those were never blocked.
+ */
+
+/* toes, fanned around the end of the leg chain. 0 = straight down,
+ * positive toward +x, which is FORWARD for a cat authored facing right —
+ * the same convention solveLeg uses, so a paw points the way its leg
+ * points. */
+function toeMask(foot, paw, host) {
+  const m = host.emptyMask();
+  if (!paw || !paw.toes) return m;
+  const n = paw.toes;
+  const aim = paw.aim || 0;
+  for (let i = 0; i < n; i++) {
+    const f = n === 1 ? 0.5 : i / (n - 1);
+    const d = dir((aim - paw.spread + 2 * paw.spread * f) * DEG);
+    const cx = foot[0] + d[0] * paw.tof;
+    const cy = foot[1] + d[1] * paw.tof;
+    for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++) {
+      const dx = (x + 0.5 - cx) / paw.r, dy = (y + 0.5 - cy) / paw.r;
+      if (dx * dx + dy * dy <= 1) m[y][x] = true;
+    }
+  }
+  return m;
+}
+
+/* The torso. Falls back to the single ellipse, which is what every
+ * geometry that shipped has and what `GEOM_64` still draws. */
+function torsoMask(host, g, bodyY) {
+  const body = g.body;
+  const T = g.torso;
+  let m;
+  if (T && T.lobes && T.lobes.length) {
+    m = host.maskOr.apply(null, T.lobes.map(l =>
+      host.maskEllipse(body.x + l.dx, body.y + l.dy + (bodyY || 0), l.rx, l.ry)));
+  } else if (T && T.spine && T.spine.length) {
+    m = maskChain(T.spine.map(s => [s[0], s[1] + (bodyY || 0)]), T.spine.map(s => s[2]), host);
+  } else {
+    m = host.maskEllipse(body.x, body.y + (bodyY || 0), body.rx, body.ry);
+  }
+  for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++)
+    if (y + 0.5 > g.FLOOR) m[y][x] = false;
+  return m;
+}
+
+const FAR = { farBack: true, farFront: true };
+
+/* A candidate cat at a pose, drawn with the shipped rig. Paint order is
+ * the shipped order: tail behind, legs behind, torso over the hips, head
+ * last. */
+function drawCandidate(p, host, g) {
+  host = host || makeHost(g.size, g.size);
+  const G = host.grid();
+  const body = g.body;
+  const by = body.y + (p.bodyY || 0);
+
+  host.paint(G, maskChain(tailChain(p, g).points, tailChain(p, g).radii, host), 'W', 'K');
+
+  const legs = rig2Legs(p, host, g);
+  const masks = {};
+  LEG_KEYS.forEach(k => {
+    const A = legs.parts[k];
+    if (!A) { masks[k] = null; return; }
+    let m = maskChain(A.points, A.radii, host);
+    const tm = toeMask(A.points[3], g.paw, host);
+    let any = false;
+    for (let y = 0; y < host.H && !any; y++)
+      for (let x = 0; x < host.W; x++) if (tm[y][x]) { any = true; break; }
+    masks[k] = any ? host.maskOr(m, tm) : m;
+  });
+  LEG_KEYS.forEach(k => { if (masks[k]) host.paint(G, masks[k], FAR[k] ? 'G' : 'W', 'K'); });
+
+  const bodyMask = torsoMask(host, g, p.bodyY || 0);
+  host.paint(G, bodyMask, 'W', 'K');
+  host.shadeBelow(G, bodyMask, body.x,
+    by + (g.torso && g.torso.shadeFrom != null ? g.torso.shadeFrom : body.ry * 0.27), 'H');
+
+  const s = paintHead(G, host, g, p);
+
+  /* the pad, on a near paw that is actually down */
+  ['nearBack', 'nearFront'].forEach(k => {
+    const A = legs.parts[k];
+    if (!A) return;
+    if (A.points[3][1] < g.PAW_Y - 0.4 * (g.size / 32)) return;
+    host.px(G, A.points[3][0] - 0.5,
+      Math.min(Math.round(A.points[3][1] + 1.0 * (g.size / 32)), g.padRow), 'P');
+  });
+
+  return { rows: G.map(r => r.join('')), legs: legs, solve: s, geom: g };
+}
+
+/* A STANDING POSE — four feet down, weight even.
+ *
+ * The femur runs down from the hip, so putting the paw straight below the
+ * hip is what throws the fold into the tibia, and that fold is the
+ * digitigrade Z. It is the two-link solve producing it, not an authored
+ * angle: this pose carries no tibia or meta angle anywhere. */
+function idlePose(g, over) {
+  const p = Object.assign({
+    bodyY: 0, headDX: 0, headDY: 0, headTilt: 0,
+    tailLift: 0, tailSway: 0,
+    tailCurl: g.tailChain.idleCurl != null ? g.tailChain.idleCurl : 34,
+    tailBias: g.tailChain.idleBias != null ? g.tailChain.idleBias : 0.50,
+    tailLen: g.tailChain.len
+  }, over || {});
+  LEG_KEYS.forEach(k => {
+    p[k + '_hipX'] = g.legX[k];
+    p[k + '_hipA'] = 0;
+    p[k + '_footX'] = g.legX[k] + 0.4;
+    p[k + '_footY'] = g.PAW_Y;
+  });
+  return p;
+}
+
+function geomForIdle(g, over) {
+  return idlePose(g, over);
+}
+
+/* ---------- the three candidates ----------------------------------------
+ *
+ * Deliberately spread across the axes a cat's proportions actually run
+ * on — leg length, head-to-body, torso shape, paw definition — so the
+ * choice between them is a real choice and not three timids.
+ *
+ * COUCH   short legs, deep round torso, big head. The cat the 32x32 grid
+ *         was forcing, drawn properly, with toes.
+ * SHEER   the departure. NO cloud: a ribcage lobe, a small high waist lobe
+ *         and a haunch OR-ed into one outlined shape, long thin legs, the
+ *         smallest head. Reads as a young cat built to run.
+ * KITTEN  a kitten: head 45% of her standing height, tiny body, stubby
+ *         legs, round-tipped ears, four splayed toes on every paw.
+ */
+
+const CANDIDATE_COUGH = geomVariant(GEOM_64, {
+  FLOOR: 58.0, LEG_TOP: 43.0, HIP_Y: 44.0, PAW_Y: 56.0,
+  body: { x: 28.0, y: 37.0, rx: 17.0, ry: 10.5 },
+  head: { x: 45.0, y: 22.0, rx: 11.0, ry: 10.2 },
+  headEar: { top: 13.5, wide: 12.5, inner: 8.6, pink: [7.4, 10.8], r: 1.6 },
+  legX: { nearFront: 45.0, farBack: 15.0, nearBack: 25.0, farFront: 34.0 },
+  padRow: 57,
+  /* the toes have to stick OUT past the paw ball or they are invisible:
+     tof + r is how far the toe reaches from the paw point, and the ball
+     is only 2.50, so each toe protrudes 1.55px and makes a scallop. */
+  paw: { toes: 3, tof: 2.6, spread: 50, aim: 70, r: 1.05 },
+  tailChain: { x: 14.0, y: 33.0, len: 22.0, rBase: 3.4, rTip: 1.2, baseA: 64, idleCurl: 130, idleBias: 0.25 },
+  leg: {
+    front: { femur: 5.2, tibia: 6.4, meta: 4.6, r: [3.40, 2.70, 2.10, 2.50] },
+    hind: { femur: 5.4, tibia: 6.4, meta: 4.4, r: [3.60, 2.90, 2.20, 2.50] }
+  }
+});
+
+const CANDIDATE_SHEER = geomVariant(GEOM_64, {
+  FLOOR: 58.0, LEG_TOP: 32.0, HIP_Y: 33.0, PAW_Y: 56.0,
+  body: { x: 28.0, y: 31.0, rx: 15.0, ry: 8.5 },
+  /* four lobes, one mask: deep chest forward, deepest ribcage, a SMALL
+   * HIGH waist, and a haunch behind.
+   *
+   * The waist lobe has to be small AND high or there is no tuck at all.
+   * With ry 6.0 and its centre 5px BELOW the ribcage's, its belly line
+   * landed at exactly the ribcage's — a four-lobe torso with a FLAT
+   * belly, which reads as the very loaf it was built to replace. The tuck
+   * is the entire point of this candidate, so the numbers are set FROM the
+   * belly line: ribcage bottom 36, waist bottom 31.5, haunch bottom 34.5.
+   * A 4.5px tuck above the belly and a matching dip in her back. */
+  torso: {
+    lobes: [
+      { dx: 12.0, dy: -3.0, rx: 6.5, ry: 9.5 },
+      { dx: 4.0, dy: -5.0, rx: 9.0, ry: 10.0 },
+      { dx: -4.0, dy: -5.0, rx: 5.5, ry: 5.5 },
+      { dx: -11.0, dy: -5.0, rx: 8.0, ry: 8.5 }
+    ],
+    shadeFrom: 4.0
+  },
+  head: { x: 46.0, y: 15.0, rx: 8.6, ry: 8.4 },
+  headEar: { top: 10.5, wide: 9.8, inner: 7.0, pink: [5.8, 8.8], r: 2.2 },
+  legX: { nearFront: 45.0, farBack: 17.0, nearBack: 26.0, farFront: 35.0 },
+  padRow: 57,
+  paw: { toes: 3, tof: 2.4, spread: 44, aim: 66, r: 1.00 },
+  /* THE TAIL IS THE CANVAS WALL AGAIN, and it is worth writing down.
+     A 27px tail off a rump at x=12 on a body that sits high has NO base
+     angle that fits: swept from 40 to 96 degrees every one of them either
+     runs off the left edge or off the top. So this cat gets a 20px tail
+     and a rump two pixels further forward. She is the longest-bodied of
+     the three and has the shortest tail, which is the grid talking, not
+     the cat. */
+  tailChain: { x: 14.0, y: 27.0, len: 20.0, rBase: 3.5, rTip: 1.0, baseA: 58, idleCurl: 130, idleBias: 0.25 },
+  leg: {
+    front: { femur: 8.4, tibia: 11.0, meta: 7.7, r: [2.80, 1.90, 1.45, 2.10] },
+    hind: { femur: 8.6, tibia: 11.0, meta: 7.5, r: [3.00, 2.10, 1.60, 2.10] }
+  }
+});
+
+const CANDIDATE_KITTEN = geomVariant(GEOM_64, {
+  FLOOR: 58.0, LEG_TOP: 45.0, HIP_Y: 46.0, PAW_Y: 56.0,
+  /* the head sits LOW and only 15px forward of the body centre, not 16
+     and not 3 higher. At x=44 the skull cleared the chest entirely —
+     589 of 1299 inked pixels floated free of her body. A kitten's head
+     hangs over her own chest; this one now does too. */
+  body: { x: 27.0, y: 41.0, rx: 13.0, ry: 8.0 },
+  head: { x: 42.0, y: 26.5, rx: 12.6, ry: 11.8 },
+  /* earRnd rounds the apex: the tip is OR-ed into the triangle's own mask
+   * so a round ear is still ONE outlined shape */
+  headEar: { top: 14.0, wide: 11.0, inner: 9.0, pink: [8.4, 12.0], r: 2.4 },
+  legX: { nearFront: 42.0, farBack: 16.0, nearBack: 24.0, farFront: 33.0 },
+  padRow: 57,
+  paw: { toes: 4, tof: 2.6, spread: 50, aim: 40, r: 1.15 },
+  tailChain: { x: 15.0, y: 39.0, len: 24.0, rBase: 3.0, rTip: 1.0, baseA: 54, idleCurl: 130, idleBias: 0.25 },
+  leg: {
+    front: { femur: 4.2, tibia: 5.2, meta: 3.8, r: [2.90, 2.40, 1.90, 2.30] },
+    hind: { femur: 4.4, tibia: 5.2, meta: 3.6, r: [3.00, 2.50, 2.00, 2.30] }
+  }
+});
+
+const CANDIDATES = [
+  {
+    key: 'couch', name: 'COUCH', geom: CANDIDATE_COUGH,
+    blurb: 'Short legs, deep round torso, big head. The cat the 32x32 grid was ' +
+           'forcing, drawn properly — and the paws have three toes.',
+    departure: 'smallest'
+  },
+  {
+    key: 'sheer', name: 'SHEER', geom: CANDIDATE_SHEER,
+    blurb: 'No cloud anywhere. A ribcage, a small high waist and a haunch OR-ed ' +
+           'into one outlined shape; long thin legs; the smallest head. A cat ' +
+           'built to run.',
+    departure: 'the big one'
+  },
+  {
+    key: 'kitten', name: 'KITTEN', geom: CANDIDATE_KITTEN,
+    blurb: 'A kitten. The head is most of her, the body is small, the legs are ' +
+           'stubby, the ears are round-tipped and every paw has four splayed toes.',
+    departure: 'large'
+  }
+];
+
 module.exports = {
   DEG, makeHost, HOST_32, maskChain,
-  GEOM_32, GEOM_64, geomFor, LEG_SPEC, LEG_SPEC_64,
+  GEOM_32, GEOM_64, geomFor, geomVariant, LEG_SPEC, LEG_SPEC_64,
   solveLeg, legMask, rig2Legs, drawFrame, measureStanding,
   lerpPose, walkPose, bentPose, tuckPose, groomPose, solveLegAngles,
   dirTail, tailChain, tailPose, curvatureProfile, drawTailOnCat,
-  headSolve, headTiltPose, headDrift, drawHeadOnCat, oldPoseAsVector, walkPoseFromOldCycle,
-  footPath, LEG_KEYS, legAt, GAIT, frac
+  headSolve, headTiltPose, headDrift, drawHeadOnCat, paintHead, oldPoseAsVector, walkPoseFromOldCycle,
+  footPath, LEG_KEYS, legAt, GAIT, frac,
+  toeMask, torsoMask, drawCandidate, idlePose, geomForIdle,
+  CANDIDATES, CANDIDATE_COUGH, CANDIDATE_SHEER, CANDIDATE_KITTEN
 };

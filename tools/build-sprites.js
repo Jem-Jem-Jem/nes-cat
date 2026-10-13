@@ -1877,6 +1877,275 @@ cover + '\n' +
   console.log('  sprite data inlined as text; canvas 2D is the browser, not a dependency');
 }
 
+/* ---------- --candidates: three silhouettes, side by side ------------
+ *
+ * A RESHAPE, not a migration.
+ *
+ * Every 64x64 frame so far inherited the 32x32 cat's proportions almost
+ * exactly - same cloud torso, same head mass, same stubby paws - and
+ * only spread over a bigger grid. Measured at matched display size that
+ * gave 31% less ink in the torso, 7 rows shorter, 17% narrower, which
+ * read as a cat balanced on stilts. The cause was not the rig.
+ *
+ * The three candidates below are DIFFERENT CATS, not three renderings of
+ * one set of numbers. They are driven through the same rig2 - the same
+ * two-link leg solve, the same tail chain, the same rotatable head - so
+ * a candidate cannot quietly lose a feature, because those three are the
+ * only way anything in this repo gets drawn at 64x64.
+ *
+ * THIS IS A TASTE DECISION and the numbers below are for INFORMING it,
+ * not for making it. They are measured and reported so a human chooses
+ * with both eyes open; they are not the brief.
+ */
+if (mode === '--candidates') {
+  const rig2 = require('./rig2.js');
+  const fsx = require('fs');
+  const host64 = rig2.makeHost(64, 64);
+
+  /* Everything a human needs to choose, measured off the DRAWN frame
+   * rather than read off the geometry table. */
+  function measure(c) {
+    const g = c.geom;
+    const f = rig2.drawCandidate(rig2.idlePose(g), host64, g);
+    const rows = f.rows;
+
+    let top = 99, bot = -1, left = 99, right = -1, ink = 0;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      if (rows[y][x] === '.') continue;
+      ink++;
+      if (y < top) top = y; if (y > bot) bot = y;
+      if (x < left) left = x; if (x > right) right = x;
+    }
+
+    /* connectivity, the same 4-way contract the frame checker uses */
+    const seen = Array.from({ length: 64 }, () => new Array(64).fill(false));
+    let islands = 0, biggest = 0;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      if (seen[y][x] || rows[y][x] === '.') continue;
+      islands++;
+      const st = [[x, y]]; seen[y][x] = true; let n = 0;
+      while (st.length) {
+        const q = st.pop(); n++;
+        const nb = [[q[0] + 1, q[1]], [q[0] - 1, q[1]], [q[0], q[1] + 1], [q[0], q[1] - 1]];
+        for (const w of nb)
+          if (w[0] >= 0 && w[0] < 64 && w[1] >= 0 && w[1] < 64 &&
+              !seen[w[1]][w[0]] && rows[w[1]][w[0]] !== '.') { seen[w[1]][w[0]] = true; st.push(w); }
+      }
+      if (n > biggest) biggest = n;
+    }
+
+    /* the torso mask itself, so the head sitting on the chest and the
+     * legs coming out of the belly are not counted as torso */
+    const tm = rig2.torsoMask(host64, g, 0);
+    let tT = 99, tB = -1, tL = 999, tR = -1, tInk = 0;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      if (!tm[y][x]) continue;
+      tInk++;
+      if (y < tT) tT = y; if (y > tB) tB = y;
+      if (x < tL) tL = x; if (x > tR) tR = x;
+    }
+
+    /* the legs: does anything clamp, and does the joint that actually
+     * reads on a digitigrade cat - the ankle - actually bend? */
+    let clamped = 0, knee = 0, ankle = 0;
+    rig2.LEG_KEYS.forEach(k => {
+      const A = f.legs.parts[k];
+      if (!A) return;
+      if (A.clamped) clamped++;
+      knee = Math.max(knee, A.bendPx.knee);
+      ankle = Math.max(ankle, A.bendPx.ankle);
+    });
+
+    /* toe separation: local maxima on the foot's bottom edge. A bare paw
+     * is one smooth arc and has exactly one. */
+    const A = f.legs.parts.nearFront;
+    const px = Math.round(A.points[3][0]), py = Math.round(A.points[3][1]);
+    const prof = [];
+    for (let x = px - 6; x <= px + 6; x++) {
+      let low = -1;
+      for (let y = Math.min(58, py + 8); y >= Math.max(0, py - 4); y--)
+        if (x >= 0 && x < 64 && rows[y][x] !== '.') { low = y; break; }
+      prof.push(low);
+    }
+    let toeBumps = 0;
+    for (let i = 1; i < prof.length - 1; i++)
+      if (prof[i] >= 0 && prof[i] >= prof[i - 1] && prof[i] > prof[i + 1]) toeBumps++;
+
+    const standing = g.FLOOR - top;
+    const legSpan = g.PAW_Y - g.HIP_Y;
+    return {
+      key: c.key, name: c.name, blurb: c.blurb, departure: c.departure,
+      rows: rows,
+      ink: ink, top: top, bot: bot, left: left, right: right,
+      islands: islands, biggest: biggest,
+      clipped: (top === 0 || bot === 63 || left === 0 || right === 63),
+      standing: standing, height: bot - top + 1,
+      legSpan: legSpan, legPct: legSpan / standing * 100,
+      headH: g.head.ry * 2, headPct: g.head.ry * 2 / standing * 100,
+      ratio: standing / (g.head.ry * 2),
+      torsoDepth: tB - tT + 1, torsoLen: tR - tL + 1, torsoInk: tInk,
+      torsoShape: g.torso && g.torso.lobes ? g.torso.lobes.length + ' lobes, OR-ed'
+                 : g.torso && g.torso.spine ? 'a tapered chain' : 'one ellipse (the cloud)',
+      toes: g.paw ? g.paw.toes : 0, toeBumps: toeBumps,
+      earR: g.headEar.r || 0, earTop: g.headEar.top,
+      tailSegs: g.tailChain.segs, tailLen: g.tailChain.len,
+      tailTaper: g.tailChain.rBase / g.tailChain.rTip,
+      clamped: clamped, knee: knee, ankle: ankle,
+      neck: [g.head.x + g.head.rx * g.headPivot.dx, g.head.y + g.head.ry * g.headPivot.dy]
+    };
+  }
+
+  const M = rig2.CANDIDATES.map(measure);
+
+  /* ---------- ASCII ---------- */
+  console.log('THREE CANDIDATE SILHOUETTES at 64x64, all at MATCHED size');
+  console.log('');
+  console.log('  These are three different cats, not three renderings of one set of');
+  console.log('  numbers. All three are drawn by the same rig2: the same two-link leg');
+  console.log('  solve, the same 8-segment tail chain, the same head that rotates about');
+  console.log('  the neck. The numbers below INFORM the choice; they do not make it.');
+  console.log('');
+  console.log('  name    leg%   head%   head:body   torso        paw     islands detached clamped');
+  M.forEach(m => {
+    console.log('  ' + m.name.padEnd(7) +
+      (m.legPct.toFixed(0) + '%').padStart(6) +
+      (m.headPct.toFixed(0) + '%').padStart(9) +
+      ('1:' + m.ratio.toFixed(1)).padStart(12) +
+      ('  ' + m.torsoDepth + 'x' + m.torsoLen).padStart(14) +
+      ('  ' + m.toes + ' toes').padStart(10) +
+      String(m.islands).padStart(9) +
+      String(m.islands > 1 ? m.ink - m.biggest : 0).padStart(7) +
+      String(m.clamped).padStart(9));
+  });
+  console.log('');
+  M.forEach(m => {
+    console.log('  === ' + m.name + ' === ' + m.blurb);
+    console.log('      torso ' + m.torsoShape + ', ' + m.torsoInk + ' ink px' +
+      '   leg span ' + m.legSpan + 'px = ' + m.legPct.toFixed(0) +
+      '% of her ' + m.standing + 'px standing height' +
+      '   head ' + m.headH + 'px = ' + m.headPct.toFixed(0) + '%');
+    console.log('      paw ' + m.toes + ' toes, ' + m.toeBumps +
+      ' bump(s) on the foot bottom edge   ear tip radius ' + m.earR +
+      '   tail ' + m.tailSegs + ' segments, ' + m.tailLen +
+      'px, ' + m.tailTaper.toFixed(1) + 'x taper');
+    console.log('      legs: ' + m.clamped + '/4 clamped, knee fold up to ' + m.knee.toFixed(2) +
+      'px, ankle fold up to ' + m.ankle.toFixed(2) +
+      'px   head rotates about the neck (' + m.neck[0].toFixed(1) + ', ' + m.neck[1].toFixed(1) + ')');
+    console.log('      ink ' + m.ink + '   rows ' + m.top + '-' + m.bot + '   cols ' +
+      m.left + '-' + m.right + (m.clipped ? '   *** CLIPPED ***' : '   (fits the canvas)'));
+  });
+  console.log('');
+  console.log('  --- the cats themselves ---');
+
+  M.forEach(m => {
+    console.log('\n\n==== ' + m.name + ' ====');
+    console.log('  ' + m.rows.map((r, i) => String(i).padStart(2, '0') + ' ' + r).join('\n  '));
+  });
+
+  /* ---------- the HTML ---------- */
+  const CHAR = {
+    K: '#212529', W: '#ffffff', H: '#ced4da', G: '#adb5bd', P: '#f7a8c4',
+    N: '#ea7d9e', E: '#212529', B: '#f7a8c4', M: '#495057'
+  };
+  /* darker than config.js THEME_BG on purpose: THEME_BG is #212529 and so
+   * is the outline, so on THEME_BG the cat would have no edge at all. */
+  const BG = '#101215';
+  const pack = rows => JSON.stringify(rows).replace(/</g, '\\u003c');
+
+  let cells = '';
+  M.forEach(m => {
+    cells += 'cand(' + JSON.stringify(m.name) + ', ' + JSON.stringify(m.blurb) + ', ' +
+      JSON.stringify(m.departure) + ', ' + pack(m.rows) + ', ' +
+      JSON.stringify({ legPct: +m.legPct.toFixed(1), headPct: +m.headPct.toFixed(1),
+        ratio: +m.ratio.toFixed(2), standing: m.standing, legSpan: m.legSpan,
+        headH: m.headH, torsoDepth: m.torsoDepth, torsoLen: m.torsoLen,
+        torsoShape: m.torsoShape, torsoInk: m.torsoInk, toes: m.toes,
+        toeBumps: m.toeBumps, earR: m.earR, tailSegs: m.tailSegs, tailLen: m.tailLen,
+        tailTaper: +m.tailTaper.toFixed(1), knee: +m.knee.toFixed(2),
+        ankle: +m.ankle.toFixed(2), clamped: m.clamped, islands: m.islands,
+        ink: m.ink, rows: m.bot - m.top + 1, cols: m.right - m.left + 1,
+        neck: m.neck.map(v => +v.toFixed(1)) }) + ');\n';
+  });
+
+  const html =
+'<!doctype html>\n<html lang="en"><head><meta charset="utf-8">\n' +
+'<title>NES-cat &mdash; three candidate silhouettes at 64x64</title>\n' +
+'<style>\n' +
+'  body{background:' + BG + ';color:#ced4da;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;margin:0;padding:30px}\n' +
+'  h1{font-size:20px;color:#fff;margin:0 0 6px}\n' +
+'  h2{font-size:15px;color:#f7a8c4;margin:0 0 14px}\n' +
+'  p.note{color:#adb5bd;max-width:76em;margin:0 0 26px}\n' +
+'  p.note b{color:#fff}\n' +
+'  .row{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start}\n' +
+'  .cand{flex:1 1 340px;min-width:320px}\n' +
+'  .cname{color:#fff;font-size:15px;letter-spacing:.06em;margin:0 0 2px}\n' +
+'  .dep{color:#209cee;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px}\n' +
+'  canvas{image-rendering:pixelated;image-rendering:crisp-edges;background:' + BG + ';border:1px solid #343a40;display:block}\n' +
+'  .blurb{color:#adb5bd;margin:10px 0 12px;max-width:44em}\n' +
+'  table{border-collapse:collapse;font-size:12px}\n' +
+'  td{padding:2px 10px 2px 0;vertical-align:top}\n' +
+'  td.k{color:#adb5bd}\n' +
+'  td.v{color:#fff}\n' +
+'  .big{color:#f7a8c4}\n' +
+'  footer{margin-top:34px;color:#495057;border-top:1px solid #343a40;padding-top:12px}\n' +
+'</style></head><body>\n' +
+'<h1>NES-cat &mdash; which of these three is the cat?</h1>\n' +
+'<p class="note">Three 64x64 silhouettes. <b>This is a taste decision and the numbers do not make it</b> &mdash; they are here so the choice is informed rather than vibes-only. ' +
+'All three are drawn by the same rig: the same two-link leg solve, the same 8-segment tail chain, the same head rotating about the neck. ' +
+'They differ in shape only. Nothing in the game has changed; no frame has been replaced. ' +
+'Every cat is 64x64 and shown at the same scale, so size is held constant and the only thing that differs is the drawing.</p>\n' +
+'<div class="row" id="row"></div>\n' +
+'<footer>Self-contained: sprite data is inlined as text and drawn with canvas 2D, which is part of the browser, not a dependency. No build step, no server, no external files.</footer>\n' +
+'<script>\n' +
+'var CHAR=' + JSON.stringify(CHAR) + ';\n' +
+'var BG=' + JSON.stringify(BG) + ';\n' +
+'var S=5;\n' +
+'function draw(el,rows,scale){\n' +
+'  var c=document.createElement("canvas");\n' +
+'  c.width=rows[0].length*scale; c.height=rows.length*scale;\n' +
+'  var x=c.getContext("2d");\n' +
+'  x.fillStyle=BG; x.fillRect(0,0,c.width,c.height);\n' +
+'  for(var y=0;y<rows.length;y++){var r=rows[y];\n' +
+'    for(var i=0;i<r.length;i++){var ch=r.charAt(i);\n' +
+'      if(ch===".")continue;\n' +
+'      x.fillStyle=CHAR[ch]||"#ff00ff";\n' +
+'      x.fillRect(i*scale,y*scale,scale,scale);}}\n' +
+'  el.appendChild(c); return c;\n' +
+'}\n' +
+'function row(k,v){return "<tr><td class=\\"k\\">"+k+"</td><td class=\\"v\\">"+v+"</td></tr>";}\n' +
+'var rowEl=document.getElementById("row");\n' +
+'function cand(name,blurb,departure,rows,M){\n' +
+'  var d=document.createElement("div"); d.className="cand";\n' +
+'  var t=document.createElement("p"); t.className="cname"; t.textContent=name;\n' +
+'  d.appendChild(t);\n' +
+'  if(departure){var p=document.createElement("p"); p.className="dep"; p.textContent=departure; d.appendChild(p);}\n' +
+'  draw(d,rows,S);\n' +
+'  var b=document.createElement("p"); b.className="blurb"; b.textContent=blurb; d.appendChild(b);\n' +
+'  var h="<table>";\n' +
+'  h+=row("leg span", M.legSpan+"px = <b class=\\"big\\">"+M.legPct.toFixed(0)+"%</b> of standing height");\n' +
+'  h+=row("standing height", M.standing+"px");\n' +
+'  h+=row("head", M.headH+"px = <b class=\\"big\\">"+M.headPct.toFixed(0)+"%</b> of standing height");\n' +
+'  h+=row("head : body", "1:"+M.ratio.toFixed(1));\n' +
+'  h+=row("torso", M.torsoShape+", "+M.torsoDepth+"px deep x "+M.torsoLen+"px long, "+M.torsoInk+" ink px");\n' +
+'  h+=row("paws", M.toes+" toes, "+M.toeBumps+" bump(s) on the foot edge, tip radius "+M.earR);\n' +
+'  h+=row("ears", "tip radius "+M.earR+(M.earR?" (rounded)":" (pointed)"));\n' +
+'  h+=row("tail", M.tailSegs+" segments, "+M.tailLen+"px, "+M.tailTaper.toFixed(1)+"x base-to-tip taper");\n' +
+'  h+=row("legs", M.clamped+"/4 clamped, knee fold "+M.knee.toFixed(2)+"px, ankle fold "+M.ankle.toFixed(2)+"px");\n' +
+'  h+=row("head rotates", "about the neck at "+M.neck[0]+", "+M.neck[1]);\n' +
+'  h+=row("occupies", M.rows+" rows x "+M.cols+" cols of 64, "+M.ink+" ink px, "+M.islands+" island(s)");\n' +
+'  h+="</table>";\n' +
+'  var tb=document.createElement("div"); tb.innerHTML=h; d.appendChild(tb);\n' +
+'  rowEl.appendChild(d);\n' +
+'}\n' +
+cells +
+'</script></body></html>\n';
+
+  fsx.writeFileSync(path.join(__dirname, '..', '.freebuff', 'candidates.html'), html, 'utf8');
+  console.log('');
+  console.log('  HTML written: ' + (html.length / 1024).toFixed(1) +
+    ' KB to .freebuff/candidates.html (self-contained)');
+}
+
 if (mode === '--check-selftest') {
   const copyOf = k => F[k].map(r => r.split(''));
   const flat = rows => rows.map(r => r.join(''));
