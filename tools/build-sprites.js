@@ -1791,7 +1791,7 @@ if (mode === '--sheet') {
 
   let cells = '';
   PAIRS.forEach(pair => {
-    cells += 'sec(' + pair.group + ', ' + JSON.stringify(pair.old) + ', ' +
+    cells += 'sec(' + JSON.stringify(pair.group) + ', ' + + JSON.stringify(pair.old) + ', ' +
       pack(scale2(F[pair.old])) + ', ' + pack(asRows(pair.new())) + ');\n';
   });
   let cover = '';
