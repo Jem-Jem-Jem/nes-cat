@@ -1618,6 +1618,17 @@ if (mode === '--check') {
         ' to ear tip row ' + m.top + '), leg span ' + m.leg.toFixed(1) +
         'px = ' + m.pct.toFixed(1) + '% of standing height');
     }
+    /* for a raised leg, where the paw actually got to — the thing this
+     * slice is about */
+    LEGS_R2.filter(k => d.legs.parts[k] && (p[k + '_legUp'] > 0)).forEach(k => {
+      const paw = d.legs.parts[k].points[3];
+      const hx = G.head.x + (p.headDX || 0), hy = G.head.y + (p.headDY || 0) + (p.bodyY || 0);
+      const dSk = Math.hypot((paw[0] - hx) / G.head.rx, (paw[1] - hy) / G.head.ry);
+      const ex = hx + G.head.rx * 0.10, ey = hy - G.head.ry * 0.18;
+      console.log('  RAISED PAW ' + k + ' at (' + paw[0].toFixed(1) + ',' + paw[1].toFixed(1) +
+        ')  inside the head mass: ' + (dSk <= 1 ? 'YES' : 'no, ' + dSk.toFixed(2)) +
+        '  ' + Math.hypot(paw[0] - ex, paw[1] - ey).toFixed(1) + 'px from the eye');
+    });
     return d.rows;
   };
 
@@ -1632,7 +1643,20 @@ if (mode === '--check') {
   });
 
   /* The case this slice is for: a leg with a real bend in it. */
-  if (!useOld) {
+  const poseArg = process.argv.indexOf('--pose');
+  const pose = poseArg >= 0 ? process.argv[poseArg + 1] : null;
+
+  if (pose && pose.indexOf('groom') === 0) {
+    const variant = pose === 'groom2' ? 1 : 0;
+    console.log('\n---- GROOMING (--pose ' + pose + '), paw lifted to the face ----');
+    const gc = at.map(t => {
+      const label = pose + ' t=' + t.toFixed(2);
+      return { label: label, rows: dump(label, rig2.groomPose(t, variant, N)) };
+    });
+    for (let y = 0; y < N; y++) {
+      console.log(gc.map(c => (c.rows[y] || '').padEnd(N, '.')).join(' '));
+    }
+  } else if (!useOld) {
     console.log('\n---- BENT foreleg, the pose the acceptance is measured on ----');
     const bendCells = at.map(t => {
       const label = 'bent t=' + t.toFixed(2);

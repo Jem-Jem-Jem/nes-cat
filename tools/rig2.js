@@ -234,7 +234,9 @@ const GEOM_32 = {
     hipSwing: 0.55, bodyLift: 0.45, headLead: 0.8, tailSway: 1.05, tailAmp: 0.45,
     hipA: { front: 16, hind: 26 }
   },
-  bend: { hipX: 21.0, headDY: 2.6, frontHip: 7, frontTibia: -9, frontMeta: 4, hindHip: 8, hindTibia: -9, hindMeta: 4 }
+  bend: { hipX: 21.0, headDY: 2.6, frontHip: 7, frontTibia: -9, frontMeta: 4, hindHip: 8, hindTibia: -9, hindMeta: 4 },
+  groom: { liftHigh: 180, liftLow: 168, bodyY1: 0.3, bodyY2: 0.4,
+           headDY1: 1.0, headDY2: 1.3, headDX1: -1.5, headDX2: -2.5, tailSway: 2.0 }
 };
 
 const GEOM_64 = {
@@ -252,12 +254,12 @@ const GEOM_64 = {
   leg: {
     front: {
       femur: 7.0, tibia: 9.2, meta: 6.4,
-      r: [3.40, 2.50, 2.10, 3.00],
+      r: [3.10, 2.10, 1.80, 2.90],
       bend: -1, maxBend: 62, hipLimit: 40, tuck: -0.60
     },
     hind: {
       femur: 7.2, tibia: 9.2, meta: 6.2,
-      r: [3.60, 2.70, 2.30, 3.00],
+      r: [3.30, 2.30, 2.00, 2.90],
       bend: -1, maxBend: 58, hipLimit: 42, tuck: 0.45
     }
   },
@@ -270,7 +272,12 @@ const GEOM_64 = {
   /* the pose the acceptance criterion is measured on: a front leg with
    * the paw up and drawn back, so the stifle, hock and metatarsus all
    * leave the straight line at once. */
-  bend: { hipX: 44.0, headDY: 3.0, frontHip: 30, frontTibia: -40, frontMeta: 20, hindHip: 32, hindTibia: -38, hindMeta: 20 }
+  bend: { hipX: 44.0, headDY: 3.0, frontHip: 30, frontTibia: -40, frontMeta: 20, hindHip: 32, hindTibia: -38, hindMeta: 20 },
+  /* grooming: how far the foreleg is lifted, in degrees. Measured, not
+   * guessed — see GROOM_TARGET. 176 puts the paw on the cheek beside
+   * the eye; 158 puts it lower, on the muzzle. */
+  groom: { liftHigh: 180, liftLow: 168, bodyY1: 0.6, bodyY2: 0.8,
+           headDY1: 4.0, headDY2: 2.5, headDX1: -3.0, headDX2: -5.0, tailSway: 4.0 }
 };
 
 function geomFor(size) {
@@ -510,8 +517,78 @@ function bentPose(t, size) {
   return p;
 }
 
-/* tuckPose from slice 1, kept because the tucked leg is still the case
- * groom/wash/knead/hold are asking for. */
+/* GROOM_TARGET — why the paw gets to the face, measured.
+ *
+ * Slice 2's closing note said "a 22.6px chain cannot reach the cheek at
+ * y~12, it clamps and lies." y~12 is the CROWN. Measured from the hip
+ * at (44,36) on a 22.6px chain:
+ *
+ *     cheek  (44,18)  18.0px away   slack 4.6px   REACHABLE
+ *     ear    (41,13)  23.2px away   slack -0.6px  impossible
+ *     crown  (44,12)  24.0px away   slack -1.4px  impossible
+ *
+ * So the target was wrong, not the leg, and no geometry had to change.
+ * A grooming cat brings a paw to the SIDE of her face — the cheek, the
+ * ear base, the corner of the eye — not to the top of her head.
+ *
+ * The lift is what closes the gap. A standing nearFront has its paw
+ * 19px BELOW its hip; `legUp` rotates that about the hip, so the paw
+ * arrives 19px ABOVE it, at row ~16. Nothing is stretched and nothing
+ * clamps, because the chain is exactly as long as it always was.
+ *
+ * The head comes DOWN to meet the paw rather than the paw being dragged
+ * up past it, which is both what a cat does and the reason a 3px head
+ * dip is enough.
+ *
+ * `variant` selects the beat:
+ *   0  paw to the cheek beside the eye, head level   — the lick
+ *   1  paw lower on the muzzle, head dipped further   — the wash
+ * Both keep three paws on the ground, because a cat that has both front
+ * paws up is not washing, it is falling over. */
+function groomPose(t, variant, size) {
+  const g = geomFor(size);
+  const v = variant ? 1 : 0;
+  const e = t * t * (3 - 2 * t);
+  const G = g.groom;
+  const p = {
+    bodyY: (v ? G.bodyY2 : G.bodyY1) * e,
+    headDY: (v ? G.headDY2 : G.headDY1) * e,
+    headDX: (v ? G.headDX2 : G.headDX1) * e,
+    tailSway: G.tailSway
+  };
+  LEG_KEYS.forEach(k => {
+    const at = legAt(g, k);
+    const grooms = (k === 'nearFront');
+    p[k + '_hipX'] = at.baseX;
+    p[k + '_legUp'] = 0;
+    p[k + '_hide'] = 0;
+    if (grooms) {
+      /* The grooming leg's angles are authored BACKWARDS on purpose.
+       * `legUp` rotates the finished chain, so the sign that reads as
+       * "elbow forward" after the lift is a negative femur BEFORE it.
+       * Measured post-lift this puts the elbow 3.6px in front of the
+       * shoulder, the wrist 3.3px behind it and the paw forward again
+       * at the cheek — a Z with the point down at the front, which is
+       * the shape of a foreleg held up to a face. */
+      p[k + '_hipA'] = -35;
+      p[k + '_tibiaA'] = 45;
+      p[k + '_metaA'] = -20;
+    } else {
+      /* The other three keep PAW TARGETS, not angles, so that when the
+       * body dips they stay planted. An angle-driven leg is rigidly
+       * welded to the body and sinks with it; a cat crouching to wash
+       * keeps all three other feet on the floor. */
+      p[k + '_hipA'] = at.kind === 'front' ? 6 : 10;
+      p[k + '_footX'] = at.baseX;
+      p[k + '_footY'] = g.PAW_Y;
+    }
+  });
+  /* the grooming leg: lifted to the face, and folded rather than
+   * straight, so the bend is the one the walk already has */
+  p.nearFront_hipX = g.legX.nearFront;
+  p.nearFront_legUp = (v ? G.liftLow : G.liftHigh) * e;
+  return p;
+}
 function tuckPose(t, size) {
   const g = geomFor(size);
   const s = g.size / 32;
@@ -592,14 +669,38 @@ function walkPoseFromOldCycle(t, size) {
 function legMask(p, key, g) {
   g = g || geomFor(p.size);
   const at = legAt(g, key);
+  let L;
   /* a pose may carry explicit joint angles, in which case the chain is
    * pure FK; otherwise the paw target drives the two-link solve */
   if (typeof p[key + '_tibiaA'] === 'number') {
-    return solveLegAngles(g.leg[at.kind], p[key + '_hipX'], g.HIP_Y + p.bodyY,
-                          p[key + '_hipA'] || 0, p[key + '_tibiaA'], p[key + '_metaA'] || 0);
+    L = solveLegAngles(g.leg[at.kind], p[key + '_hipX'], g.HIP_Y + p.bodyY,
+                       p[key + '_hipA'] || 0, p[key + '_tibiaA'], p[key + '_metaA'] || 0);
+  } else {
+    L = solveLeg(g.leg[at.kind], p[key + '_hipX'], g.HIP_Y + p.bodyY,
+                 p[key + '_hipA'], p[key + '_footX'], p[key + '_footY']);
   }
-  return solveLeg(g.leg[at.kind], p[key + '_hipX'], g.HIP_Y + p.bodyY,
-                  p[key + '_hipA'], p[key + '_footX'], p[key + '_footY']);
+  /* `legUp` LIFTS the whole leg about the hip. A grooming cat raises her
+   * foreleg roughly vertical alongside her chest, which is not a
+   * hip-joint rotation the 0=down convention can express (it would need
+   * angles past 90 degrees) but it is exactly a rotation of the solved
+   * chain about its own hip.
+   *
+   * This is why a 22.6px chain reaches the cheek. Rotating a leg whose
+   * paw is 19px below its hip puts that paw 19px ABOVE the hip, so the
+   * paw arrives at row ~16 without the chain being lengthened by one
+   * pixel and therefore without ever clamping. See GROOM_TARGET. */
+  const up = p[key + '_legUp'];
+  if (up) {
+    const a = up * DEG, c = Math.cos(a), s = Math.sin(a);
+    const h = L.points[0];
+    L = Object.assign({}, L, {
+      points: L.points.map((q, i) => i === 0 ? q : [
+        h[0] + (q[0] - h[0]) * c - (q[1] - h[1]) * s,
+        h[1] + (q[0] - h[0]) * s + (q[1] - h[1]) * c
+      ])
+    });
+  }
+  return L;
 }
 
 function rig2Legs(p, host, g) {
@@ -620,7 +721,7 @@ function drawFrame(p, host, size) {
   const G = host.grid();
   const body = g.body, head = g.head;
   const bx = body.x, by = body.y + p.bodyY;
-  const hx = head.x, hy = head.y + p.headDY + p.bodyY;
+  const hx = head.x + (p.headDX || 0), hy = head.y + p.headDY + p.bodyY;
   const E = g.headEar, T = g.tail;
 
   host.stampCurve(G, [bx - body.rx + T.base, by - T.from],
@@ -673,6 +774,27 @@ function drawFrame(p, host, size) {
   pxIn(nx, ny + eo * 2, 'M');
   host.shadeBelow(G, headAll, hx, hy + head.ry * 0.22, 'H');
 
+  /* A RAISED paw draws over the face, and it draws over it LAST.
+   * A cat washing her cheek puts the paw in front of it, and the paw is
+   * the subject of the pose; the muzzle and the eye painting over the
+   * paw leaves it looking like a cat with her head down for no reason.
+   * This has to come after the face, which is the whole reason it did
+   * not work when it sat with the ears.
+   *
+   * Only the part of a lifted leg that is actually up here is redrawn.
+   * The clip is what keeps slice 1's regression from coming back: that
+   * regression was the HIP ball stamping a leg-coloured blob on her
+   * flank, and the hip is 6.5px inside an 8.5px-deep belly, far below
+   * the cut. A raised leg is CLIPPED, not merely reordered. */
+  LEG_KEYS.forEach(k => {
+    if (!legs.parts[k]) return;
+    if (!(p[k + '_legUp'] > 0)) return;
+    const lm = maskChain(legs.parts[k].points, legs.parts[k].radii, host);
+    const cut = Math.min(host.H - 1, Math.round(hy + head.ry));
+    for (let y = cut + 1; y < host.H; y++) for (let x = 0; x < host.W; x++) lm[y][x] = false;
+    host.paint(G, lm, (k === 'farFront' || k === 'farBack') ? 'G' : 'W', 'K');
+  });
+
   /* paw pad on a near paw that is actually down */
   ['nearBack', 'nearFront'].forEach(k => {
     const A = legs.parts[k];
@@ -707,6 +829,6 @@ module.exports = {
   DEG, makeHost, HOST_32, maskChain,
   GEOM_32, GEOM_64, geomFor, LEG_SPEC, LEG_SPEC_64,
   solveLeg, legMask, rig2Legs, drawFrame, measureStanding,
-  lerpPose, walkPose, bentPose, tuckPose, oldPoseAsVector, walkPoseFromOldCycle,
+  lerpPose, walkPose, bentPose, tuckPose, groomPose, solveLegAngles, oldPoseAsVector, walkPoseFromOldCycle,
   footPath, LEG_KEYS, legAt, GAIT, frac
 };
