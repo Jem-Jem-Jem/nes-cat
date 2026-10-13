@@ -1573,70 +1573,93 @@ if (mode === '--check') {
    * frame build above is untouched and cannot be reached from this file
    * by accident. `--check` and `--build` never call it. */
   const rig2 = require('./rig2.js');
-  const host = {
-    W, H, grid, emptyMask, maskOr, maskEllipse, maskTri,
-    paint, px, shadeBelow, stampCurve, toAscii
-  };
 
-  const ts = process.argv.slice(3).filter(a => !isNaN(parseFloat(a))).map(parseFloat);
+  /* `--size` picks the grid rig2 draws on. The raster helpers come from
+   * rig2, not from this file, because these ones are bound to the 32
+   * module-level W and H and cannot address a 64x64 canvas. rig2
+   * carries its own copies, same expressions, same pixel convention. */
+  const sizeArg = process.argv.indexOf('--size');
+  const size = sizeArg >= 0 ? parseInt(process.argv[sizeArg + 1], 10) : 32;
+  const G = rig2.geomFor(size);
+  const N = G.size;
+  const host = Object.assign(rig2.makeHost(N, N), { toAscii: toAscii });
+
+  /* phases, excluding the token that follows --size (it is a grid, not a t) */
+  const args = process.argv.slice(3);
+  if (sizeArg >= 0) args.splice(args.indexOf(String(size)), 1);
+  const ts = args.filter(a => !isNaN(parseFloat(a))).map(parseFloat);
   const at = ts.length ? ts : [0, 0.25, 0.5, 0.75];
   const useOld = process.argv.indexOf('--old') >= 0;
   const LEGS_R2 = rig2.LEG_KEYS;
 
+  console.log('rig2 at ' + N + 'x' + N +
+    '   hip y=' + G.HIP_Y + '  paw y=' + G.PAW_Y +
+    '  leg span ' + (G.PAW_Y - G.HIP_Y).toFixed(1) + 'px');
+
   /* One frame in the repo's own --preview format, plus the resolved joint
    * angles, because the question this mode exists to answer is whether a
-   * leg FOLDS at a fractional phase and the angles are the evidence. */
+   * leg FOLDS and the angles are the evidence. */
   const dump = (label, p) => {
-    const d = rig2.drawFrame(p, host);
+    const d = rig2.drawFrame(p, host, N);
     console.log('\n== ' + label + ' ==');
     console.log(host.toAscii(d.rows));
     console.log('  ' + LEGS_R2.filter(k => d.legs.parts[k]).map(k => {
       const a = d.legs.parts[k];
-      return k + '  hip ' + a.angles.hip.toFixed(0) +
-             '  tibia ' + a.angles.tibia.toFixed(0) +
-             '  meta ' + a.angles.meta.toFixed(0) +
+      return k + '  hip ' + a.angles.hip.toFixed(1) +
+             '  tibia ' + a.angles.tibia.toFixed(1) +
+             '  meta ' + a.angles.meta.toFixed(1) +
              '  | fold off the straight line: knee ' + a.bendPx.knee.toFixed(2) +
              '  ankle ' + a.bendPx.ankle.toFixed(2) + ' px' +
              (a.clamped ? '  UNREACHABLE' : '');
     }).join('\n  '));
+    if (d.legs.mask) {
+      const m = rig2.measureStanding(d.rows, G);
+      console.log('  standing height ' + m.height.toFixed(1) + 'px (ground ' + G.FLOOR +
+        ' to ear tip row ' + m.top + '), leg span ' + m.leg.toFixed(1) +
+        'px = ' + m.pct.toFixed(1) + '% of standing height');
+    }
     return d.rows;
   };
 
   const rigCells = at.map(t => {
     const label = (useOld ? 'old-cycle ' : 'rig2 walk ') + 't=' + t.toFixed(2);
-    return { label: label, rows: dump(label, useOld ? rig2.walkPoseFromOldCycle(t) : rig2.walkPose(t)) };
+    const p = useOld ? rig2.walkPoseFromOldCycle(t, N) : rig2.walkPose(t, null, N);
+    return { label: label, rows: dump(label, p) };
   });
   const oldCells = at.map(t => {
     const n = 'side_walk_' + (Math.round(t * 6) % 6);
     return { label: 'old ' + n, rows: F[n] };
   });
 
-  /* The same chain on the case that gives it room: a foreleg tucked up
-   * under the elbow, which is what groom/wash/knead/hold all want. */
+  /* The case this slice is for: a leg with a real bend in it. */
   if (!useOld) {
-    console.log('\n---- same chain, TUCKED foreleg (the case with travel) ----');
-    const tuckCells = at.map(t => {
-      const label = 'tuck t=' + t.toFixed(2);
-      return { label: label, rows: dump(label, rig2.tuckPose(t)) };
+    console.log('\n---- BENT foreleg, the pose the acceptance is measured on ----');
+    const bendCells = at.map(t => {
+      const label = 'bent t=' + t.toFixed(2);
+      return { label: label, rows: dump(label, rig2.bentPose(t, N)) };
     });
-    for (let y = 0; y < H; y++) {
-      console.log(tuckCells.map(c => (c.rows[y] || '').padEnd(W, '.')).join(' '));
+    for (let y = 0; y < N; y++) {
+      console.log(bendCells.map(c => (c.rows[y] || '').padEnd(N, '.')).join(' '));
     }
   }
 
   /* The whole point of the mode: both rigs in one glance. rig2 on the top
-   * row, the old frames it is standing next to on the one below. */
-  console.log('\n---- side by side: rig2 (top) vs the old rig\'s walk (bottom) ----');
-  const strip = cells => {
-    for (let y = 0; y < H; y++) {
-      console.log(cells.map(c => (c.rows[y] || '').padEnd(W, '.')).join(' '));
-    }
-  };
-  console.log(rigCells.map(c => c.label.padEnd(W + 1)).join(' ').slice(0, (W + 1) * at.length - 1));
-  strip(rigCells);
-  console.log('');
-  console.log(oldCells.map(c => c.label.padEnd(W + 1)).join(' ').slice(0, (W + 1) * at.length - 1));
-  strip(oldCells);
+   * row, the old frames it is standing next to on the one below. At 32
+   * they can share a frame; at 64 they cannot, so the comparison stops
+   * being the point and only rig2 is drawn. */
+  if (N === 32) {
+    console.log('\n---- side by side: rig2 (top) vs the old rig\'s walk (bottom) ----');
+    const strip = cells => {
+      for (let y = 0; y < H; y++) {
+        console.log(cells.map(c => (c.rows[y] || '').padEnd(W, '.')).join(' '));
+      }
+    };
+    console.log(rigCells.map(c => c.label.padEnd(W + 1)).join(' ').slice(0, (W + 1) * at.length - 1));
+    strip(rigCells);
+    console.log('');
+    console.log(oldCells.map(c => c.label.padEnd(W + 1)).join(' ').slice(0, (W + 1) * at.length - 1));
+    strip(oldCells);
+  }
 } else {
   /* --preview takes either a cat frame name or `yarn_0` / `bowl_food`, so the
    * room's objects can be eyeballed the same way the cat can. */
