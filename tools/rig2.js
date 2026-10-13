@@ -214,6 +214,11 @@ const GEOM_32 = {
   head: { x: 22.5, y: 13.5, rx: 6.0, ry: 5.5 },
   headEar: { top: 9.4, wide: 6.2, inner: 4.0, pink: [3.9, 5.6] },
   tail: { base: 2.5, c1: 3.2, c2: 5.0, rise: 8.0, r: 2.4, from: 0.5, c1y: 1.5, c2y: 8.0 },
+  /* the CHAIN tail, beside the bezier above. 32x64 and 2.4 -> 1.0 radii:
+   * the old tail's radius was 2.4 all the way, which is what makes it
+   * read as a sausage rather than a tail. */
+  tailChain: { segs: 8, len: 15.0, x: 12.5, y: 32.0, rBase: 2.4, rTip: 1.0, taper: 0.75,
+               swayAmp: 6, liftAmp: 5, curlMin: 10, curlMax: 55 },
   legX: { nearFront: 22.0, farBack: 7.0, nearBack: 12.0, farFront: 17.0 },
   padRow: 28,
   leg: {
@@ -249,6 +254,11 @@ const GEOM_64 = {
   head: { x: 46.0, y: 18.0, rx: 9.5, ry: 9.0 },
   headEar: { top: 12.0, wide: 11.0, inner: 8.0, pink: [6.6, 10.0] },
   tail: { base: 5.0, c1: 6.4, c2: 12.0, r: 4.0, from: 5.0, c1y: 7.0, c2y: 12.0 },
+  /* the CHAIN tail, beside the bezier above. The old one is three control
+   * points at a constant radius 4.0; this is 8 segments from 4.2 down to
+   * 1.4, so the root is three times the tip instead of equal to it. */
+  tailChain: { segs: 8, len: 26.0, x: 18.0, y: 29.0, rBase: 3.2, rTip: 1.0, taper: 0.8,
+               baseA: 22, swayAmp: 12, liftAmp: 30, curlMin: 40, curlMax: 120 },
   legX: { nearFront: 44.0, farBack: 16.0, nearBack: 25.0, farFront: 34.0 },
   padRow: 57,
   leg: {
@@ -825,10 +835,158 @@ function measureStanding(rows, g) {
   return { top: top, height: height, leg: leg, pct: (leg / height) * 100 };
 }
 
+/* ---------- 5. the tail, as a chain -------------------------------------
+ *
+ * WHY THIS IS SHAPED LIKE A CHAIN AND NOT A BEZIER.
+ *
+ * The old tail is three control points and one radius of 2.4 for the
+ * whole length, so it cannot taper and cannot change curvature along its
+ * length: a cat's tail has 15-20 vertebrae and reads as alive precisely
+ * because its shape keeps changing on the way out. A bezier with three
+ * points cannot say "the curl is tight near the tip" — only "here are
+ * three points".
+ *
+ * maskChain is already exactly the primitive this needs: a union of
+ * tapered capsules with a radius at each point. There is no second
+ * rasteriser here, and there should not be one.
+ *
+ * ANGLES. Tail angles use their own convention, because the leg
+ * convention (0 = straight down) is wrong for a tail that starts by
+ * going backwards:
+ *
+ *      0 = straight BACK (-x)      +90 = straight UP (-y)
+ *
+ * dirTail(a) = [-cos a, -sin a]
+ *
+ * THE POSE IS A FLAT VECTOR, like the legs, so it lerps. There is no
+ * table of authored tail shapes anywhere in this file; every shape here
+ * is a function of five numbers.
+ */
+
+function dirTail(a) { return [-Math.cos(a), -Math.sin(a)]; }
+
+/* tailChain: a tail pose in, a point list and a radius list out.
+ *
+ * p is the flat vector:
+ *   tailLift    base angle off straight-back, degrees
+ *   tailSway    extra base angle, degrees (the whole tail swinging)
+ *   tailCurl    total turn along the length, degrees
+ *   tailBias    where that turn is concentrated, 0..1
+ *   tailLen     total length in px
+ */
+function tailChain(p, g) {
+  const T = g.tailChain;
+  const n = T.segs;
+  const seg = (p.tailLen == null ? T.len : p.tailLen) / n;
+  /* baseA is the resting angle off straight-back; lift and sway ride on
+   * top of it. Without a baseA a tail at zero lift runs straight back out
+   * of the canvas, which at 64x64 is the same clipped-shape defect the
+   * frame checker rejects. */
+  let a = ((T.baseA || 0) + (p.tailLift || 0) + (p.tailSway || 0)) * DEG;
+  const total = (p.tailCurl || 0) * DEG;
+  const k = 1 + 6 * Math.max(0, Math.min(1, p.tailBias || 0));
+
+  /* incremental turn, weighted so the last segments take more of it as
+   * the bias rises. The weights are normalised against their own sum so
+   * the tail always turns by exactly `total`. */
+  const w = [];
+  let wsum = 0;
+  for (let i = 0; i < n; i++) {
+    const f = (i + 1) / n;
+    const v = Math.pow(f, k);
+    w.push(v); wsum += v;
+  }
+
+  const x0 = T.x, y0 = T.y;
+  const pts = [[x0, y0]];
+  const radii = [T.rBase];
+  let x = x0, y = y0;
+  for (let i = 0; i < n; i++) {
+    const d = dirTail(a);
+    x += d[0] * seg;
+    y += d[1] * seg;
+    pts.push([x, y]);
+    a += total * (w[i] / wsum);
+    /* taper: thick at the base, thin at the tip. The exponent keeps the
+     * fat end of the taper up near the root, which is where a cat's tail
+     * is actually thickest. */
+    const f = (i + 1) / n;
+    radii.push(T.rTip + (T.rBase - T.rTip) * Math.pow(1 - f, T.taper));
+  }
+  return { points: pts, radii: radii, segs: n };
+}
+
+/* A pose is a point in a space, so these have to be continuous in t.
+ * Nothing here is authored per frame. */
+function tailPose(t, size) {
+  const g = geomFor(size);
+  const T = g.tailChain;
+  const u = frac(t);
+  return {
+    /* the base rides a slow two-per-cycle sweep, like the old tailSway */
+    tailSway: T.swayAmp * Math.sin(2 * Math.PI * u),
+    /* it rides up and down once per cycle */
+    tailLift: T.liftAmp + T.liftAmp * 0.6 * Math.cos(2 * Math.PI * u),
+    /* and it curls: tight at the top of the lift, loose at the bottom */
+    tailCurl: T.curlMin + (T.curlMax - T.curlMin) * (0.5 - 0.5 * Math.cos(2 * Math.PI * u)),
+    tailBias: 0.25 + 0.5 * u,
+    tailLen: T.len
+  };
+}
+
+/* How much the SHAPE changes along the length, not just at the end.
+ *
+ * The old tail could be measured by comparing its tip to its base. This
+ * measures the curvature in each third of the chain separately: if a
+ * tail is a tube, all three thirds curve the same amount and the spread
+ * is ~0. If it is a tail, the thirds differ. */
+function curvatureProfile(chain) {
+  const n = chain.segs;
+  const thirds = [[], [], []];
+  for (let i = 0; i < n; i++) thirds[Math.min(2, Math.floor(i * 3 / n))].push(i);
+  return thirds.map(idx => {
+    let t = 0;
+    for (let j = 0; j < idx.length - 1; j++) {
+      const A = chain.points[idx[j]], B = chain.points[idx[j] + 1], C = chain.points[idx[j] + 2];
+      if (!C) break;
+      const a1 = Math.atan2(B[1] - A[1], B[0] - A[0]);
+      const a2 = Math.atan2(C[1] - B[1], C[0] - B[0]);
+      t += Math.abs(a2 - a1);
+    }
+    return t / Math.max(1, idx.length);
+  });
+}
+
+/* The same tail drawn on the cat, so it can be judged in context without
+ * the legs and the head changing underneath it. The tail goes down FIRST,
+ * behind the body, which is where a cat's tail is: it comes off the rump
+ * and hangs behind her. */
+function drawTailOnCat(p, host, size) {
+  const g = geomFor(size);
+  host = host || makeHost(g.size, g.size);
+  const chain = tailChain(p, g);
+  const G = host.grid();
+  const body = g.body;
+  const bx = body.x, by = body.y + (p.bodyY || 0);
+
+  /* the chain hangs off the rump, so its first segment is drawn behind
+   * the torso whatever the pose does */
+  host.paint(G, maskChain(chain.points, chain.radii, host), 'W', 'K');
+
+  const bodyMask = host.maskEllipse(bx, by, body.rx, body.ry);
+  for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++)
+    if (y + 0.5 > g.FLOOR) bodyMask[y][x] = false;
+  host.paint(G, bodyMask, 'W', 'K');
+  host.shadeBelow(G, bodyMask, bx, by + body.ry * 0.27, 'H');
+
+  return G.map(r => r.join(''));
+}
+
 module.exports = {
   DEG, makeHost, HOST_32, maskChain,
   GEOM_32, GEOM_64, geomFor, LEG_SPEC, LEG_SPEC_64,
   solveLeg, legMask, rig2Legs, drawFrame, measureStanding,
-  lerpPose, walkPose, bentPose, tuckPose, groomPose, solveLegAngles, oldPoseAsVector, walkPoseFromOldCycle,
+  lerpPose, walkPose, bentPose, tuckPose, groomPose, solveLegAngles,
+  dirTail, tailChain, tailPose, curvatureProfile, drawTailOnCat, oldPoseAsVector, walkPoseFromOldCycle,
   footPath, LEG_KEYS, legAt, GAIT, frac
 };

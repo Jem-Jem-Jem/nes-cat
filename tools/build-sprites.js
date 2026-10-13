@@ -1920,7 +1920,53 @@ if (mode === '--check') {
   const poseArg = process.argv.indexOf('--pose');
   const pose = poseArg >= 0 ? process.argv[poseArg + 1] : null;
 
-  if (pose && pose.indexOf('groom') === 0) {
+  if (pose === 'tail') {
+    /* The tail is a chain, so the useful view is the CHAIN on its own
+     * next to the cat it belongs to: a tail that only ever looks right
+     * in context proves nothing about whether it tapers or curls. */
+    console.log('\n---- SEGMENTED TAIL, 64x64 chain: taper and curvature along the length ----');
+    const T = G.tailChain;
+    console.log('  ' + T.segs + ' segments, length ' + T.len + 'px, base radius ' + T.rBase +
+      ' -> tip radius ' + T.rTip + '  (' + (T.rBase / T.rTip).toFixed(2) + 'x taper)');
+
+    const ts = [0, 0.25, 0.5, 0.75, 1];
+    const chains = ts.map(t => rig2.tailChain(rig2.tailPose(t, N), G));
+    const poses = ts.map(t => rig2.tailPose(t, N));
+
+    console.log('\n    t     base angle   curl   bias | curvature per segment, root third -> tip third');
+    ts.forEach((t, i) => {
+      const c = rig2.curvatureProfile(chains[i]);
+      console.log('  ' + t.toFixed(2).padStart(5) +
+        '   ' + (T.baseA + poses[i].tailLift + poses[i].tailSway).toFixed(0).padStart(6) + ' deg' +
+        poses[i].tailCurl.toFixed(0).padStart(8) +
+        poses[i].tailBias.toFixed(2).padStart(7) + '  |  ' +
+        c.map(v => v.toFixed(4)).join('  ') +
+        '   spread ' + (Math.max.apply(null, c) - Math.min.apply(null, c)).toFixed(4));
+    });
+
+    /* the chain alone, drawn as ink, so the taper and the curl are
+     * visible without the cat in the way */
+    console.log('\n---- the chain alone (rows 0-34, cols 0-26) ----');
+    ts.forEach((t, i) => {
+      const m = rig2.maskChain(chains[i].points, chains[i].radii, host);
+      console.log('\n  t=' + t.toFixed(2));
+      for (let y = 0; y < 35; y++) {
+        let line = '   ' + String(y).padStart(2) + ' ';
+        for (let x = 0; x < 27; x++) line += m[y][x] ? '#' : '.';
+        console.log(line);
+      }
+    });
+
+    /* the same tail drawn on the cat */
+    console.log('\n---- the tail on the cat, side by side ----');
+    const cells = ts.map((t, i) => ({
+      label: 't=' + t.toFixed(2),
+      rows: rig2.drawTailOnCat(rig2.tailPose(t, N), host, N)
+    }));
+    for (let y = 0; y < N; y++) {
+      console.log(cells.map(c => (c.rows[y] || '').padEnd(N, '.')).join(' '));
+    }
+  } else if (pose && pose.indexOf('groom') === 0) {
     const variant = pose === 'groom2' ? 1 : 0;
     console.log('\n---- GROOMING (--pose ' + pose + '), paw lifted to the face ----');
     const gc = at.map(t => {
