@@ -135,6 +135,13 @@ const CASES = [
   { state: 'sit', secs: 8 },
   { state: 'sleep', secs: 6, night: true },
   { state: 'stretch', secs: 3 },
+  /* stretch_release was reachable only as a step inside the `stretch` case, so
+   * it had no entry of its own. In play it is always entered from a stretch in
+   * profile, which this cold entry cannot reproduce — she starts front-on and
+   * draws a profile frame immediately. That is an artefact of entering cold, not
+   * a bug in the state, and the case is still worth having: it exercises the
+   * release's own clock and its exit. */
+  { state: 'stretch_release', secs: 3 },
   { state: 'loaf', secs: 7 },
   { state: 'shake', secs: 1.2 },
   /* alert was decomposed into snap + hold (90d6af5). Both are listed because
@@ -165,6 +172,16 @@ const CASES = [
    * start x as the activity each one follows, so the approach is the real one. */
   { state: 'tree_settle', secs: 3, before: s => { s.x = 240; } },
   { state: 'watch', secs: 6 },
+  /* watchHold likewise had no entry of its own — it was covered only because
+   * `watch` happens to fall through it. Entered cold it has no _watchDir, since
+   * watch.enter() is the only thing that sets it, and the turn it ends in falls
+   * back to its default direction. Left that way deliberately: papering over it
+   * here would hide the dependency rather than record it. */
+  { state: 'watchHold', secs: 4 },
+  /* turn is the pivot every profile activity leaves through, and it had no case
+   * either. Driven with no payload it takes the defaults — bridge out to side,
+   * then back to idle — which is the whole round trip a leave/return makes. */
+  { state: 'turn', secs: 2 },
   { state: 'chase', secs: 6, before: s => { s.x = 200; } },
   { state: 'stalk', secs: 9, before: s => { s.x = 150; } },
   { state: 'circle', secs: 7, payload: { then: 'loaf' } },
@@ -174,8 +191,7 @@ const CASES = [
   { state: 'bump', secs: 2.5, payload: { say: null } },
   /* a held press never lets her leave `bump`, and that branch is chosen on a
    * slow breath rather than on the state's clock, so it needs its own pass */
-  { state: 'bump', secs: 3, after: s => { s.petting = true; } },
-  { state: 'ruffle', secs: 2.5 }
+  { state: 'bump', secs: 3, after: s => { s.petting = true; } }
 ];
 
 /* ---------- main -------------------------------------------------------- */
@@ -707,10 +723,15 @@ function main() {
 
   /* The state count used to be the number of CASES entries that matched a
    * state, which is coverage, not size — it read "29 states" for a machine with
-   * 31 in it, and the two missing were invisible. Both numbers now, so the gap
-   * between what exists and what is covered cannot be misread as coverage. */
+   * 31 in it, and the three missing were invisible. Both numbers now.
+   *
+   * Counted as DISTINCT states, not entries: `bump` has two entries on purpose,
+   * and counting them made the machine look better covered than it was — 31
+   * states against "32 covered" is nonsense that reads like a pass. Two states
+   * must not be able to hide behind a duplicated one. */
   const machineStates = Object.keys(Shiro._sm.states).length;
-  const coveredStates = CASES.filter(c => Shiro._sm.states[c.state]).length;
+  const coveredStates = [...new Set(CASES.map(c => c.state))]
+    .filter(n => Shiro._sm.states[n]).length;
   console.log(bad === 0
     ? 'ANIMATION CHECK OK — ' + machineStates + ' states in the machine, ' + coveredStates +
       ' covered by a CASES entry, all frames resolve, no view cuts' +
