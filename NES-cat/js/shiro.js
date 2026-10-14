@@ -22,6 +22,12 @@
   var NESCAT = (root.NESCAT = root.NESCAT || {});
   var U = NESCAT.util;
   var CFG = NESCAT.config;
+  /* BEHAVIOR hoisted to file scope because Shiro.POSES resolves durations from
+   * it. It used to be a local of poseFor(), which was fine while the pose rules
+   * were branches inside that same function and would have been a
+   * ReferenceError the moment they moved into a table — the table is declared
+   * here, outside poseFor, so it cannot see its locals. */
+  var Bh = CFG.BEHAVIOR;
 
   /* 5x5 pixel glyphs for the particle flourishes. */
   var GLYPH = {
@@ -1569,6 +1575,254 @@
     return this.frameFor().indexOf('side_') === 0;
   };
 
+  /* ---------- what pose each state draws, as DATA ----------
+   *
+   * THIS WAS AN IF-CHAIN. poseFor() was one function with a
+   * `if (st === '...') return '...'` branch per state, and it grew by one every
+   * time a state was added — every decomposition added one, in the middle of a
+   * function that was already enormous. That is a lookup table written as
+   * control flow, and the cost was never the line count. It was that the set of
+   * states something COULD answer for was invisible: you could not ask "which
+   * states have a pose rule", only read them in order and remember.
+   *
+   * So it is a table. One entry per state, enumerable, and the fallthrough is
+   * explicit — a state with no entry here falls through to the front-view
+   * postures at the bottom of poseFor(). Adding a state is now an entry in
+   * this object rather than a branch wedged into the middle of someone else's
+   * function.
+   *
+   * It lives INSIDE shiro.js rather than in its own file, and that is a
+   * constraint rather than a preference: tools/check-animations.js loads a
+   * hardcoded list of files and this one, and it is not to be modified. A
+   * sibling poses.js would simply not exist as far as the harness is
+   * concerned, and anim:check would fail on every state.
+   *
+   * NOTHING HERE CHANGED BEHAVIOUR. Each resolver is the body of the branch it
+   * replaced, moved across with its comment — and that is checked rather than
+   * asserted: the frame sequence of all 23 deterministic states is captured
+   * before and after and diffed.
+   *
+   * Each resolver receives the state's elapsed time and is called with `this`
+   * bound to Shiro, because they all need her private bookkeeping — _act.phase,
+   * petting, _bob, _turn, x. */
+  Shiro.Pose = {
+    cyc: function (frames, lead, rate, t) {
+      if (t < lead) return frames[0];
+      return frames[Math.floor((t - lead) * rate) % frames.length];
+    }
+  };
+
+  /* A two-frame loop keyed on a sine — the cheapest way to say "alternate
+   * forever at this rate". Several states are exactly this and were four
+   * characters of branch each. */
+  function sway(rate, a, b, t) { return (Math.sin(t * rate) > 0) ? a : b; }
+
+  /* walk and chase are the same rule with a different stride, and
+   * pounce_approach is walk's — three states, one rule, two constants. */
+  function stride(isChase) {
+    return function () {
+      var s = isChase ? (Bh.chaseStride || 3) : (Bh.walkStride || 5);
+      var step = Math.floor(Math.abs(this.x - (this._walkStartX || this.x)) / s);
+      return 'side_walk_' + (step % 6);
+    };
+  }
+
+  Shiro.POSES = {
+    /* ---------- front-view states ---------- */
+
+    sleep: function (t) {
+      /* she curls down into the sleep rather than snapping into it */
+      if (t < Bh.sleepSettle) return 'sleep_settle';
+      return (Math.sin(this._bob) > 0) ? 'sleep_0' : 'sleep_1';
+    },
+
+    react: function (t) { return (t < 0.16) ? 'react_0' : 'react_1'; },
+
+    /* alert_snap: the startle — always alert_0 */
+    'alert_snap': function () { return 'alert_0'; },
+
+    /* alert_hold: sustained attention — always alert_1 */
+    'alert_hold': function () { return 'alert_1'; },
+
+    /* knead: two poses, alternating fast — a phase offset reads as a paw
+     * pressing into the blanket rather than a two-frame loop */
+    knead: function (t) { return sway(7.5, 'side_knead_0', 'side_knead_1', t); },
+
+    /* ---------- the rotation ---------- */
+
+    /* Hold the pose we are leaving, step through the two three-quarter frames,
+     * and let the destination state draw its first frame. The `from` anchor
+     * only shows briefly — at this size the motion between the bridge frames
+     * is what reads. */
+    turn: function (t) {
+      var self = this;
+      var tp = U.clamp(t / (self._turn.dur || 1), 0, 1);
+      var mid = Shiro.TURN_MID[self._turn.to] || Shiro.TURN_MID.side;
+      if (tp < 0.4) return self.pickFrame(self._turn.from, mid[0]);
+      if (tp < 0.72) return mid[0];
+      return mid[1];
+    },
+
+    /* ---------- travel ---------- */
+
+    /* Stepping is driven by distance travelled, not by elapsed time. Cycling
+     * on a clock means the paws slide whenever her speed and the frame rate
+     * disagree — which is always, because she accelerates, turns and stops.
+     * One frame per fixed distance travelled means the stride stays under her
+     * however fast she is going.
+     *
+     * chase shares the cycle on a shorter stride, and that is the whole trick:
+     * a run at this size is not a different set of frames, it is the same
+     * stride played faster — the paws cycle about 1.6x as often, and the two
+     * passing beats in the gait (where the body rides highest) come round that
+     * much faster too. The bounce is what reads as a run. */
+    walk: stride(false),
+    chase: stride(true),
+    /* pounce_approach walks on the ordinary stride, not the chase one: it is a
+     * purposeful approach to something, not a run after it. */
+    'pounce_approach': stride(false),
+
+    /* clock-stepped, unlike the walk: she is turning on the spot rather than
+     * travelling, so there is no ground for the paws to be stepped by and a
+     * distance-driven cycle would stall at the ends of every swing */
+    circle: function (t) { return 'side_walk_' + (Math.floor(t * 9) % 6); },
+
+    /* ---------- the hunt ---------- */
+
+    /* creeping: the two long low frames alternating as she inches in, then the
+     * coil held, because the pause before the spring is the whole tell */
+    stalk: function (t) {
+      if (this._act.phase === 0) return sway(2.4, 'side_stalk_0', 'side_stalk_1', t);
+      return 'side_stalk_2';
+    },
+
+    /* Equal thirds, not 0.3/0.7. The launch is three beats and none of them is
+     * the beat worth dwelling on. Written as a fraction of the duration so it
+     * follows pounceDur if that constant is ever retimed. */
+    pounce: function (t) {
+      var d = Bh.pounceDur;
+      if (t < d / 3) return 'side_pounce_0';
+      if (t < d * 2 / 3) return 'side_pounce_1';
+      return 'side_pounce_2';
+    },
+
+    /* ---------- at the fixtures ---------- */
+
+    eat: function (t) {
+      return Shiro.Pose.cyc(['side_eat_0', 'side_eat_1', 'side_eat_2', 'side_eat_1'], 0.25, 3.2, t);
+    },
+    drink: function (t) { return Shiro.Pose.cyc(['side_drink_0', 'side_drink_1'], 0.2, 3.0, t); },
+    groom: function (t) { return sway(2.2, 'side_groom_0', 'side_groom_1', t); },
+    wash: function (t) { return sway(2.6, 'side_wash_0', 'side_wash_1', t); },
+
+    /* Three frames rather than two, for the reason scratch has three: a
+     * two-frame loop hands you the top of the reach and the bottom of it and
+     * nothing in between, which at a loop rate reads as a flicker. The paw
+     * coming back down is what is missing, and that is the third frame.
+     *
+     * The thresholds are +/-0.5 rather than 0, and that is arithmetic rather
+     * than taste: a sine spends longer near its extremes than near its middle,
+     * so 0 splits the cycle in two halves but 0.5 is the value that splits it
+     * three ways evenly — each frame gets exactly a third of the period, and
+     * the extremes stop being the only two things anybody sees. */
+    tree: function (t) {
+      var tb = Math.sin(t * 1.9);
+      if (tb > 0.5) return 'side_tree_1';
+      if (tb < -0.5) return 'side_tree_0';
+      return 'side_tree_2';
+    },
+
+    /* three frames rather than two: at raking speed a two-frame loop is a
+     * flicker, and the third frame is the weight going the other way */
+    scratch: function (t) {
+      if (this._act.phase === 0) return 'side_walk_4';
+      return Shiro.Pose.cyc(['side_scratch_0', 'side_scratch_1', 'side_scratch_2'], 0.12, 5.5, t);
+    },
+
+    /* ---------- the settles ----------
+     *
+     * Each is a beat where she is genuinely standing still, so the turn that
+     * follows pivots out of a finished posture rather than the top of a
+     * gesture. side_stand_0 is not a special pose — it is the rig's settled
+     * profile frame, and already what the turn anchors on by default.
+     * side_stretch_3 is byte-identical to it, so a third copy of the same 32
+     * rows would buy nothing. */
+    'tree_settle': function () { return 'side_stand_0'; },
+    'scratch_settle': function () { return 'side_stand_0'; },
+    /* standing still — side_stretch_3, so the turn's anchor is a settled pose
+     * and not the half-eased stretch_2 */
+    'stretch_release': function () { return 'side_stretch_3'; },
+
+    /* stretch: arch, hold, ease back. Timed so the hold is the longest beat —
+     * the pose itself is the point, not the motion into it. The last third is
+     * a release, and the state turns her back over it, so there is no fourth
+     * frame to fall through to. */
+    stretch: function (t) {
+      var d = Bh.stretchDur;
+      if (t < d * 0.30) return 'side_stretch_0';
+      if (t < d * 0.68) return 'side_stretch_1';
+      return 'side_stretch_2';
+    },
+
+    /* the pause in the middle of watching: profile, standing still, breathing.
+     * The two turns either side of it are the turn state's problem. */
+    watchHold: function (t) { return sway(2.4, 'side_stand_0', 'side_stand_1', t); },
+
+    /* ---------- the small ones ---------- */
+
+    jump: function (t) {
+      var d = Bh.jumpDur;
+      if (t < d * 0.22) return 'side_jump_0';
+      if (t < d * 0.5) return 'side_jump_1';
+      if (t < d * 0.78) return 'side_jump_2';
+      return 'side_jump_3';
+    },
+
+    /* loaf: just breathing, until she decides to unfold */
+    loaf: function (t) { return sway(1.7, 'loaf_0', 'loaf_1', t); },
+
+    /* bump: held — a slow nuzzle, leaning in and easing back, for as long as
+     * the hand stays. A single press is the same three frames in one go. */
+    bump: function (t) {
+      if (this.petting) return (Math.sin(this._bob * 1.7) > 0) ? 'bump_1' : 'bump_0';
+      var bp = t / Bh.bumpDur;
+      if (bp < 0.32) return 'bump_0';
+      if (bp < 0.66) return 'bump_1';
+      return 'bump_2';
+    },
+
+    /* shake: a fast alternating shudder, then a settle */
+    shake: function (t) {
+      var sp = t / Bh.shakeDur;
+      if (sp < 0.66) {
+        var sh = Math.floor(t / (Bh.shakeDur / 6));
+        return sh % 2 === 0 ? 'shake_0' : 'shake_1';
+      }
+      return 'shake_2';
+    },
+
+    /* nod: a droop, a recover, and then one that does not recover.
+     *
+     * The recover is the load-bearing frame — without it the droop is just a
+     * pose she is holding — and the last beat before she goes down is pinned
+     * to the bottom of the droop instead of coming back up, so the sequence
+     * ends by admitting defeat rather than by cutting. */
+    nod: function (t) {
+      var lead = 0.4;
+      if (t < lead) return 'sit_closed';
+      var beat = Bh.nodBeat;
+      /* the last full beat, held at the bottom rather than coming back up */
+      var last = (Math.floor((Bh.nodDur - lead) / beat) - 1) * beat + lead;
+      if (t >= last) return 'nod_2';
+      /* the phase is measured from the end of the lead, not from zero, or the
+       * first cycle starts part-way through and skips its opening droop */
+      var ph = ((t - lead) % beat) / beat;
+      if (ph < 0.32) return 'nod_1';
+      if (ph < 0.60) return 'nod_2';
+      return 'nod_3';
+    }
+  };
+
   Shiro.poseFor = function () {
     /* `self` declared up front, not mid-function. In a browser an
        out-of-scope `self` silently resolves to `window` rather than
@@ -1598,204 +1852,20 @@
         ? 'side_held_calm_0' : 'side_held_calm_1';
     }
 
-    /* Hold the first frame for `lead` seconds, then loop over *every* frame.
+    /* One table, not a chain. Every state's pose rule is an entry in
+     * Shiro.POSES (declared above this function), so a state either has one
+     * or falls through to the front-view postures below. That fallthrough is
+     * the only survivor of the old if-chain, and it is the honest part of it:
+     * idle, sit, blinking and the flourish codes have always been the default
+     * rather than a named case, and they still are.
      *
-     * The loop must span the whole list, not frames[1..]. Cycling len-1 entries
-     * quietly drops the first pose from the loop and leaves it stranded as the
-     * lead-in, which breaks two states at once: a two-frame cycle collapses to
-     * a single held frame with no motion in it at all (drinking), and a
-     * palindromic one like [down, up, down, up] wraps so the repeated pose
-     * lands next to itself and the cycle reads as a hitch (eating).
-     */
-    function cyc(frames, lead, rate) {
-      if (t < lead) return frames[0];
-      return frames[Math.floor((t - lead) * rate) % frames.length];
-    }
+     * A state with no entry here falls through rather than throwing, because
+     * the front-view posture is a correct answer for anything unlisted and a
+     * hard error would take the canvas down over a missing table row. */
+    var rule = Shiro.POSES[st];
+    if (rule) return rule.call(this, t);
 
-    if (st === 'sleep') {
-      /* she curls down into the sleep rather than snapping into it */
-      if (t < Bh.sleepSettle) return 'sleep_settle';
-      return (Math.sin(this._bob) > 0) ? 'sleep_0' : 'sleep_1';
-    }
-    if (st === 'react') return (t < 0.16) ? 'react_0' : 'react_1';
-    /* The rotation itself: hold the pose we are leaving, step through the two
-     * three-quarter frames, and let the destination state draw its first
-     * frame. The `from` anchor only shows briefly — at this size the motion
-     * between the bridge frames is what reads. */
-    if (st === 'turn') {
-      var tp = U.clamp(t / (self._turn.dur || 1), 0, 1);
-      var mid = Shiro.TURN_MID[self._turn.to] || Shiro.TURN_MID.side;
-      if (tp < 0.4) return self.pickFrame(self._turn.from, mid[0]);
-      if (tp < 0.72) return mid[0];
-      return mid[1];
-    }
-    /* The pause in the middle of watching: profile, standing still, breathing.
-     * The two turns either side of it are the turn state's problem. */
-    if (st === 'watchHold') {
-      return (Math.sin(t * 2.4) > 0) ? 'side_stand_0' : 'side_stand_1';
-    }
-
-    /* Stepping is driven by distance travelled, not by elapsed time. Cycling
-     * on a clock means the paws slide whenever her speed and the frame rate
-     * disagree — which is always, because she accelerates, turns and stops.
-     * One frame per fixed distance travelled means the stride stays under
-     * her however fast she is going.
-     *
-     * chase shares the cycle on a shorter stride, and that is the whole trick:
-     * a run at this size is not a different set of frames, it is the same
-     * stride played faster — the paws cycle about 1.6x as often, and the two
-     * passing beats in the gait (where the body rides highest) come round that
-     * much faster too. The bounce is what reads as a run. */
-    if (st === 'walk' || st === 'chase' || st === 'pounce_approach') {
-      /* pounce_approach walks on the ordinary stride, not the chase one: it
-       * is a purposeful approach to something, not a run after it. */
-      var stride = st === 'chase' ? (Bh.chaseStride || 3) : (Bh.walkStride || 5);
-      var step = Math.floor(Math.abs(this.x - (this._walkStartX || this.x)) / stride);
-      return 'side_walk_' + (step % 6);
-    }
-
-    if (st === 'jump') {
-      if (t < Bh.jumpDur * 0.22) return 'side_jump_0';
-      if (t < Bh.jumpDur * 0.5) return 'side_jump_1';
-      if (t < Bh.jumpDur * 0.78) return 'side_jump_2';
-      return 'side_jump_3';
-    }
-    if (st === 'circle') {
-      /* clock-stepped, unlike the walk: she is turning on the spot rather
-       * than travelling, so there is no ground for the paws to be stepped by
-       * and a distance-driven cycle would stall at the ends of every swing */
-      return 'side_walk_' + (Math.floor(t * 9) % 6);
-    }
-    if (st === 'stalk') {
-      /* creeping: the two long low frames, alternating as she inches in */
-      if (self._act.phase === 0) {
-        return (Math.sin(t * 2.4) > 0) ? 'side_stalk_0' : 'side_stalk_1';
-      }
-      /* arrived and coiled — held, because the pause before the spring is
-       * the whole tell */
-      return 'side_stalk_2';
-    }
-    if (st === 'pounce') {
-      /* Equal thirds, not 0.3/0.7. The launch is three beats and none of them
-       * is the beat worth dwelling on; see the state comment for the measurement
-       * this replaced. Written as a third of the duration rather than as fractions
-       * so it follows pounceDur if that constant is ever retimed. */
-      if (t < Bh.pounceDur / 3) return 'side_pounce_0';
-      if (t < Bh.pounceDur * 2 / 3) return 'side_pounce_1';
-      return 'side_pounce_2';
-    }
-    if (st === 'eat') return cyc(['side_eat_0', 'side_eat_1', 'side_eat_2', 'side_eat_1'], 0.25, 3.2);
-    if (st === 'drink') return cyc(['side_drink_0', 'side_drink_1'], 0.2, 3.0);
-    if (st === 'groom') return (Math.sin(t * 2.2) > 0) ? 'side_groom_0' : 'side_groom_1';
-    if (st === 'wash') return (Math.sin(t * 2.6) > 0) ? 'side_wash_0' : 'side_wash_1';
-    /* Three frames rather than two, for the reason scratch has three: a
-     * two-frame loop hands you the top of the reach and the bottom of it and
-     * nothing in between, which at a loop rate reads as a flicker. The paw
-     * coming back down is what is missing, and that is the third frame.
-     *
-     * The thresholds are +/-0.5 rather than 0, and that is arithmetic rather
-     * than taste: a sine spends longer near its extremes than near its middle,
-     * so 0 splits the cycle in two halves but 0.5 is the value that splits it
-     * three ways evenly — each frame gets exactly a third of the period, and
-     * the extremes stop being the only two things anybody sees. */
-    if (st === 'tree') {
-      var tb = Math.sin(t * 1.9);
-      if (tb > 0.5) return 'side_tree_1';
-      if (tb < -0.5) return 'side_tree_0';
-      return 'side_tree_2';
-    }
-    if (st === 'scratch') {
-      /* three frames rather than two: at raking speed a two-frame loop is a
-       * flicker, and the third frame is the weight going the other way */
-      if (self._act.phase === 0) return 'side_walk_4';
-      return cyc(['side_scratch_0', 'side_scratch_1', 'side_scratch_2'], 0.12, 5.5);
-    }
-
-    /* stretch: arch, hold, ease back. Timed so the hold is the longest
-       * beat — the pose itself is the point, not the motion into it. */
-    if (st === 'stretch') {
-      var d = Bh.stretchDur;
-      if (t < d * 0.30) return 'side_stretch_0';
-      if (t < d * 0.68) return 'side_stretch_1';
-      /* the last third is a release, and the state turns her back to face
-       * the room over it — so there is no fourth frame to fall through to */
-      return 'side_stretch_2';
-    }
-
-    /* stretch_release: standing still — always side_stretch_3, so the turn's
-     * anchor is a settled pose and not the half-eased stretch_2 */
-    if (st === 'stretch_release') return 'side_stretch_3';
-
-    /* tree_settle and scratch_settle: the settled pose, one frame, both of
-     * them — side_stand_0. Not because the pose is special but because it is
-     * the only genuinely-settled profile frame the rig has, and it is already
-     * what the turn anchors on by default. side_stretch_3 is byte-identical to
-     * it, so a second copy of the same 32 rows would buy nothing. What these
-     * states actually add is a beat where she is *not* mid-gesture, which is
-     * what lets the turn pivot out of standing rather than out of the top of a
-     * reach. */
-    if (st === 'tree_settle' || st === 'scratch_settle') return 'side_stand_0';
-
-    /* loaf: just breathing, until she decides to unfold */
-    if (st === 'loaf') {
-      return (Math.sin(t * 1.7) > 0) ? 'loaf_0' : 'loaf_1';
-    }
-
-    if (st === 'bump') {
-      /* held: a slow nuzzle, leaning in and easing back, for as long as the
-       * hand stays. A single press is the same three frames in one go. */
-      if (self.petting) {
-        return (Math.sin(this._bob * 1.7) > 0) ? 'bump_1' : 'bump_0';
-      }
-      var bp = t / Bh.bumpDur;
-      if (bp < 0.32) return 'bump_0';
-      if (bp < 0.66) return 'bump_1';
-      return 'bump_2';
-    }
-
-    /* nod: a droop, a recover, and then one that does not recover.
-     *
-     * The recover is the load-bearing frame — without it the droop is just a
-     * pose she is holding — and the last beat before she goes down is pinned
-     * to the bottom of the droop instead of coming back up, so the sequence
-     * ends by admitting defeat rather than by cutting. */
-    if (st === 'nod') {
-      var lead = 0.4;
-      if (t < lead) return 'sit_closed';
-      var beat = Bh.nodBeat;
-      /* the last full beat, held at the bottom rather than coming back up */
-      var last = (Math.floor((Bh.nodDur - lead) / beat) - 1) * beat + lead;
-      if (t >= last) return 'nod_2';
-      /* the phase is measured from the end of the lead, not from zero, or
-       * the first cycle starts part-way through and skips its opening droop */
-      var ph = ((t - lead) % beat) / beat;
-      if (ph < 0.32) return 'nod_1';
-      if (ph < 0.60) return 'nod_2';
-      return 'nod_3';
-    }
-
-    /* shake: a fast alternating shudder, then a settle */
-    if (st === 'shake') {
-      var sp = t / Bh.shakeDur;
-      if (sp < 0.66) {
-        var sh = Math.floor(t / (Bh.shakeDur / 6));
-        return sh % 2 === 0 ? 'shake_0' : 'shake_1';
-      }
-      return 'shake_2';
-    }
-
-    /* alert_snap: the startle — always alert_0 */
-    if (st === 'alert_snap') return 'alert_0';
-
-    /* alert_hold: sustained attention — always alert_1 */
-    if (st === 'alert_hold') return 'alert_1';
-
-    /* knead: two poses, alternating fast — a phase offset reads as a paw
-       * pressing into the blanket rather than a two-frame loop */
-    if (st === 'knead') {
-      return (Math.sin(t * 7.5) > 0) ? 'side_knead_0' : 'side_knead_1';
-    }
-
+    /* ---------- front view: idle, sit, blink, flourish ---------- */
     var breathing = Math.sin(this._bob) > 0.55;
     var blink = this.blinkAt();
     /* Sitting has its own base pose, but the tail variants exist for it too,
