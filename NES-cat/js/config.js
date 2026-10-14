@@ -186,6 +186,18 @@
        * still in, and it is what the turn pivots from, so it has to land
        * before the rotation rather than being cut by it. */
       stretchReleaseDur: 0.4,
+      /* the same beat for the two perch activities, for the same reason.
+       * `tree` and `scratch` both ended on a frame caught mid-gesture —
+       * tree_0 is the top of a reach, scratch_0 is the paw at the top of a
+       * rake — and endActivity() hands the turn whatever frame is on screen,
+       * so the rotation pivoted out of an unfinished posture. These two
+       * durations own the settled pose instead. They are separate constants
+       * rather than one shared beat even though both are 0.4 today, because a
+       * settle is the first thing anyone would retune when a performance reads
+       * too long, and a bat and a scratch should not move together when that
+       * happens. */
+      treeSettleDur: 0.4,
+      scratchSettleDur: 0.4,
       loafDur: 5.5,
       wStretch: 18,
       wLoaf: 14,

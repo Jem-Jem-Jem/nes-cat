@@ -158,11 +158,18 @@ const CASES = [
   { state: 'groom', secs: 5 },
   { state: 'wash', secs: 4 },
   { state: 'tree', secs: 9, before: s => { s.x = 240; } },
+  /* tree_settle and scratch_settle are the beats where she stands still having
+   * stopped reaching / stopped raking, so the turn pivots out of a finished
+   * posture. Both need a case: a case naming a state the machine does not have
+   * is silently skipped, and the frames they draw then read as orphans. Same
+   * start x as the activity each one follows, so the approach is the real one. */
+  { state: 'tree_settle', secs: 3, before: s => { s.x = 240; } },
   { state: 'watch', secs: 6 },
   { state: 'chase', secs: 6, before: s => { s.x = 200; } },
   { state: 'stalk', secs: 9, before: s => { s.x = 150; } },
   { state: 'circle', secs: 7, payload: { then: 'loaf' } },
   { state: 'scratch', secs: 7, before: s => { s.x = 250; } },
+  { state: 'scratch_settle', secs: 3, before: s => { s.x = 250; } },
   { state: 'nod', secs: 7, night: true },
   { state: 'bump', secs: 2.5, payload: { say: null } },
   /* a held press never lets her leave `bump`, and that branch is chosen on a

@@ -281,6 +281,19 @@
         }
       },
 
+      /* tree: batting at the hanging toy, and then settling out of it.
+       *
+       * The three-frame cycle runs on a sine, so `tree` used to stop wherever
+       * the sine happened to be — and it stopped on tree_0, the top of the
+       * reach, forepaws up, spine extended. endActivity() hands the turn the
+       * frame that is on screen, so the rotation then held that fully
+       * extended pose for 40% of the turn while she visibly came down out of
+       * it. Measured: 28 frames of one pose, 17 of them inside `tree` and 11
+       * re-held by the turn.
+       *
+       * It now exits to tree_settle, which owns a settled pose, so the beat
+       * where she stops reaching is a state rather than an accident of the
+       * sine's phase. The poke is unchanged and still fires on arrival. */
       tree: {
         enter: function (sm, from) {
           self.beginActivity(sm, from,
@@ -294,6 +307,25 @@
             self.faceFixture();
             NESCAT.Scene.pokeToy(7);
           }
+          if (s.time > self._act.dur) sm.set('tree_settle');
+        }
+      },
+
+      /* tree_settle: standing still, having stopped reaching.
+       *
+       * Not a new pose. side_stand_0 IS the settled pose in this rig — it is
+       * already what the turn anchors on by default (see the `from:` fallbacks
+       * in the turn branches) — and side_stretch_3, built for exactly this
+       * job on the stretch, came out pixel-identical to it. Another copy of
+       * the same 32 rows would have cost a frame and taught nothing, so this
+       * state reuses it. The point was never the frame; it was owning
+       * the beat where she is no longer mid-gesture, so the pivot has a
+       * standing cat to pivot from. */
+      tree_settle: {
+        enter: function () {
+          self._act = { dur: B.treeSettleDur };
+        },
+        update: function (dt, s) {
           if (s.time > self._act.dur) self.endActivity();
         }
       },
@@ -309,7 +341,15 @@
        * has a bare section of rope between its two perches for exactly this.
        *
        * Only offered when she is already near the tree, for the same reason
-       * `tree` is: she is not going to cross the room to scratch something. */
+       * `tree` is: she is not going to cross the room to scratch something.
+       *
+       * It also now settles on its way out, for the same reason `tree` does.
+       * The rake cycles at 5.5Hz and stopped wherever the cycle happened to
+       * be, which was scratch_0 — both forelegs up, rocked back, the top of
+       * the stroke. Measured: 21 frames of that one pose, 10 inside `scratch`
+       * and 11 re-held by the turn. For a state whose whole argument is
+       * commitment, freezing at the top of the stroke and then rotating out
+       * of it was the worst of the two endings. */
       scratch: {
         enter: function (sm, from) {
           self.beginActivity(sm, from, {
@@ -324,6 +364,19 @@
             self._sm.time = 0;
             self.faceFixture();
           }
+          if (s.time > self._act.dur) sm.set('scratch_settle');
+        }
+      },
+
+      /* scratch_settle: standing still, raking finished. Same settled pose and
+       * the same reasoning as tree_settle — she comes down off the post and
+       * is standing before the turn picks her up, so the rotation pivots out
+       * of a posture that has finished rather than one caught mid-stroke. */
+      scratch_settle: {
+        enter: function () {
+          self._act = { dur: B.scratchSettleDur };
+        },
+        update: function (dt, s) {
           if (s.time > self._act.dur) self.endActivity();
         }
       },
@@ -1489,9 +1542,9 @@
  * prefix by the build tool, authored facing right and mirrored at draw time. */
   Shiro.SIDE_STATES = {
     walk: 1, jump: 1, pounce: 1, pounce_approach: 1,
-    eat: 1, drink: 1, groom: 1, wash: 1, tree: 1,
+    eat: 1, drink: 1, groom: 1, wash: 1, tree: 1, tree_settle: 1,
     turn: 1, watch: 1, watchHold: 1, stretch: 1, stretch_release: 1, knead: 1, chase: 1,
-    stalk: 1, circle: 1, scratch: 1
+    stalk: 1, circle: 1, scratch: 1, scratch_settle: 1
   };
 
   /* Two different questions about the view, and they are not interchangeable:
@@ -1672,6 +1725,16 @@
     /* stretch_release: standing still — always side_stretch_3, so the turn's
      * anchor is a settled pose and not the half-eased stretch_2 */
     if (st === 'stretch_release') return 'side_stretch_3';
+
+    /* tree_settle and scratch_settle: the settled pose, one frame, both of
+     * them — side_stand_0. Not because the pose is special but because it is
+     * the only genuinely-settled profile frame the rig has, and it is already
+     * what the turn anchors on by default. side_stretch_3 is byte-identical to
+     * it, so a second copy of the same 32 rows would buy nothing. What these
+     * states actually add is a beat where she is *not* mid-gesture, which is
+     * what lets the turn pivot out of standing rather than out of the top of a
+     * reach. */
+    if (st === 'tree_settle' || st === 'scratch_settle') return 'side_stand_0';
 
     /* loaf: just breathing, until she decides to unfold */
     if (st === 'loaf') {
