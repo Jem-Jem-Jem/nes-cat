@@ -2421,7 +2421,7 @@ const SKELETON = {
   skull: { w: 8.4, h: 6.5 },
   /* the true ribcage, as seen head-on */
   body: { w: 8.4, h: 6.2 },
-  ear: { top: 7.6, wide: 5.4, inner: 3.4 },
+  ear: { top: 7.6, wide: 5.4, inner: 3.4, pink: [3.9, 5.6] },
   /* the neck, as a fraction of skull radii from the skull centre. Head-on it
    * is almost directly below the skull; in profile it is behind AND below,
    * which is why the side pivot has an x offset and the front one does not. */
@@ -2463,7 +2463,8 @@ function projectSkeleton(view, over) {
       { rx: K.body.w * V.bodyX, ry: K.body.h * V.bodyY }),
     head: Object.assign({}, K.skull, { x: o.headX, y: o.headY },
       { rx: K.skull.w * V.skullX, ry: K.skull.h * V.skullY }),
-    headEar: { top: K.ear.top * V.earTop, wide: K.ear.wide * V.earWide, inner: K.ear.inner },
+    headEar: { top: K.ear.top * V.earTop, wide: K.ear.wide * V.earWide, inner: K.ear.inner,
+                pink: K.ear.pink },
     headPivot: Object.assign({}, view === 'side' ? K.neckSide : K.neck),
     tailChain: Object.assign({}, K.tail, {
       segs: K.tail.segs * V.tailSegs,
@@ -2526,7 +2527,8 @@ function skeletonProjection(view, size, k) {
             rx: K.body.w * V.bodyX, ry: K.body.h * V.bodyY },
     head: { x: base.head.x, y: base.head.y,
             rx: K.skull.w * V.skullX, ry: K.skull.h * V.skullY },
-    headEar: { top: K.ear.top * V.earTop, wide: K.ear.wide * V.earWide, inner: K.ear.inner },
+    headEar: { top: K.ear.top * V.earTop, wide: K.ear.wide * V.earWide, inner: K.ear.inner,
+                pink: K.ear.pink },
     headPivot: Object.assign({}, view === 'side' ? K.neckSide : K.neck),
     tailChain: { segs: K.tail.segs * V.tailSegs, len: K.tail.len * V.tailLen,
                  rBase: K.tail.rBase * V.tailRBase, rTip: K.tail.rTip * V.tailRTip,
