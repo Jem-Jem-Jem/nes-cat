@@ -148,6 +148,11 @@ const CASES = [
   { state: 'walk', secs: 8, payload: { x: 40 } },
   { state: 'jump', secs: 1.4 },
   { state: 'pounce', secs: 4, before: s => { s.x = 200; } },
+  /* pounce_approach is the walk that used to be phase 0 of pounce. It needs a
+   * case of its own: a case naming a state the machine does not have is
+   * silently skipped, and its frames then read as orphans. Same x=200 setup so
+   * it is measured over the same 122px approach the old phase 0 covered. */
+  { state: 'pounce_approach', secs: 4, before: s => { s.x = 200; } },
   { state: 'eat', secs: 8 },
   { state: 'drink', secs: 7 },
   { state: 'groom', secs: 5 },

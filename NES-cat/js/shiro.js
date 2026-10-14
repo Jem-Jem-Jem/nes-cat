@@ -328,20 +328,59 @@
         }
       },
 
-      pounce: {
+      /* pounce_approach: the walk-in, split out of `pounce`.
+       *
+       * It was never really part of the launch. `pounce` owned two beats — a
+       * walk to the yarn, then a 0.75s launch — on ONE clock, and the pose
+       * ladder is keyed to _sm.time, which was only zeroed when the walk
+       * finished. So the ladder ran during the walk as well: the moment t
+       * passed pounceDur*0.7 she began drawing side_pounce_2, the touchdown
+       * pose, and held it for as long as she had ground left to cover.
+       * Measured from x=200, that was 2.083s — 61.9% of the state — of a
+       * landing freeze at zero lift while she walked across the room. It was
+       * the longest single-frame hold in the piece by a wide margin.
+       *
+       * The walk is now its own state with its own clock and its own frames.
+       * It is a purposeful walk at an ordinary pace, so it steps out on the
+       * distance-driven stride the rest of the travelling art uses — she is
+       * walking, so she walks. `dur` is 0 because it ends on arrival rather
+       * than on a clock; nothing reads it. */
+      pounce_approach: {
         enter: function (sm, from) {
           self.beginActivity(sm, from, {
-            target: NESCAT.Scene._yarnX - 26, dur: B.pounceDur, phase: 0, hit: false
+            target: NESCAT.Scene._yarnX - 26, dur: 0, phase: 0
           });
+        },
+        update: function (dt, s) {
+          if (!self.arrive(dt, self._act.target)) return;
+          self.faceFixture();
+          self._sm.set('pounce');
+        }
+      },
+
+      /* pounce: the launch, and only the launch.
+       *
+       * Three beats in three equal parts of pounceDur, rather than the
+       * 30/40/30 the old 0.3/0.7 thresholds gave. The middle beat is the
+       * airborne one, and it is exactly the beat that should not be the
+       * longest hold — 0.30s of a frozen mid-air sprite is the stop that
+       * made the arc read as a blur followed by a stall. A third each puts
+       * the longest hold at 33.3% of the state, inside the 26-38% band
+       * every other overloaded state in the piece already sits in.
+       *
+       * The swat still fires at p > 0.45, which under equal thirds is still
+       * the extension frame — this does not move it.
+       *
+       * target null: nothing left to walk to, but arrive() still pivots,
+       * which is how the hand-off out of pounce_approach stays a bridge
+       * rather than a cut. Same shape as jump. */
+      pounce: {
+        enter: function (sm, from) {
+          self.beginActivity(sm, from, { target: null, dur: B.pounceDur, hit: false });
           self._lift = 0;
         },
         update: function (dt, s) {
-          if (self._act.phase === 0) {
-            if (!self.arrive(dt, self._act.target)) return;
-            self._act.phase = 1;
-            self._sm.time = 0;
-            self.faceFixture();
-          }
+          if (!self.arrive(dt, self._act.target)) return;
           var p = U.clamp(s.time / self._act.dur, 0, 1);
           self._lift = Math.sin(p * Math.PI) * B.pounceHeight;
           /* the swat lands a bit before she touches down */
@@ -414,7 +453,10 @@
           /* there: one more go at it, or lose interest and go back to the room */
           self._hunt = (self._hunt || 0) + 1;
           if (self._hunt < B.chaseMax && self._awake > 0.3) {
-            self._sm.set('pounce', {});
+            /* into the walk, not the launch: she has run to where the yarn USED
+             * to be, and the pounce spot is elsewhere. pounce_approach closes
+             * that gap and hands the launch its own clock. */
+            self._sm.set('pounce_approach');
             return;
           }
           self.endActivity();
@@ -1021,7 +1063,7 @@
      * bothered with the suspense. A worn-out cat does neither. */
     if (this._awake > 0.35) {
       pool.push(['stalk', B.wStalk]);
-      pool.push(['pounce', B.wYarn]);
+      pool.push(['pounce_approach', B.wYarn]);
     }
 
     var total = 0, i;
@@ -1446,7 +1488,7 @@
  * `if (side)` through frameFor(). Side frames are emitted with a `side_`
  * prefix by the build tool, authored facing right and mirrored at draw time. */
   Shiro.SIDE_STATES = {
-    walk: 1, jump: 1, pounce: 1,
+    walk: 1, jump: 1, pounce: 1, pounce_approach: 1,
     eat: 1, drink: 1, groom: 1, wash: 1, tree: 1,
     turn: 1, watch: 1, watchHold: 1, stretch: 1, stretch_release: 1, knead: 1, chase: 1,
     stalk: 1, circle: 1, scratch: 1
@@ -1551,7 +1593,9 @@
      * stride played faster — the paws cycle about 1.6x as often, and the two
      * passing beats in the gait (where the body rides highest) come round that
      * much faster too. The bounce is what reads as a run. */
-    if (st === 'walk' || st === 'chase') {
+    if (st === 'walk' || st === 'chase' || st === 'pounce_approach') {
+      /* pounce_approach walks on the ordinary stride, not the chase one: it
+       * is a purposeful approach to something, not a run after it. */
       var stride = st === 'chase' ? (Bh.chaseStride || 3) : (Bh.walkStride || 5);
       var step = Math.floor(Math.abs(this.x - (this._walkStartX || this.x)) / stride);
       return 'side_walk_' + (step % 6);
@@ -1579,8 +1623,12 @@
       return 'side_stalk_2';
     }
     if (st === 'pounce') {
-      if (t < Bh.pounceDur * 0.3) return 'side_pounce_0';
-      if (t < Bh.pounceDur * 0.7) return 'side_pounce_1';
+      /* Equal thirds, not 0.3/0.7. The launch is three beats and none of them
+       * is the beat worth dwelling on; see the state comment for the measurement
+       * this replaced. Written as a third of the duration rather than as fractions
+       * so it follows pounceDur if that constant is ever retimed. */
+      if (t < Bh.pounceDur / 3) return 'side_pounce_0';
+      if (t < Bh.pounceDur * 2 / 3) return 'side_pounce_1';
       return 'side_pounce_2';
     }
     if (st === 'eat') return cyc(['side_eat_0', 'side_eat_1', 'side_eat_2', 'side_eat_1'], 0.25, 3.2);
