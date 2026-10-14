@@ -89,24 +89,70 @@ body {
     opacity: 0.6;
 }
 
-/* dialogue box — centred along the bottom, under the stage.
-   Width and text size are kept in step: the box has to grow with the type
-   or the line wraps into a wall of tiny words. Both scale down together in
-   the narrow-viewport block at the bottom of this file. */
+/* dialogue box — anchored to the TOP of the playfield, sized in logical px.
+ *
+ * WHY THE TOP. The floor band (logical y 116-180, the bottom 36% of the
+ * room) is where every interactive object lives: the yarn at y 160-172
+ * slides between YARN_MIN_X 92 and YARN_MAX_X 138, the two bowls sit at
+ * y 130-133, and Shiro walks it. The wall band above the floor line
+ * holds the rod, the window, the toy and the cat tree — decoration.
+ * Covering decoration to keep interaction reachable is the right trade.
+ *
+ * WHY IT USED TO BE AT THE BOTTOM. It was positioned in CSS against the
+ * WINDOW (bottom: 12px) while the room is blitted to a CENTRED
+ * INTEGER-SCALED rect, so the box covered a different slice of the room
+ * at every window size. Measured against the yarn: 100% of the yarn was
+ * hidden at 1280x720, 640x360 and 480x270, and 0% at 800x600 and
+ * 1024x768. Not a layout, a coincidence.
+ *
+ * EVERY LENGTH BELOW IS IN `--stage-u`, which is ONE LOGICAL PIXEL in
+ * CSS pixels (sketch.js sets it to `scale`). So the box's height is a
+ * fixed fraction of the ROOM rather than of the screen, and it tracks
+ * the room when the logical grid doubles. Measured, box height in CSS px
+ * and where the bottom edge lands in LOGICAL room y:
+ *
+ *     320x180  scale 1  compact   60 css px = 60.0 logical px  y 29.0 - 89.0
+ *     640x360  scale 2  compact   60 css px = 30.0 logical px  y 16.0 - 46.0
+ *    1280x720  scale 4  normal   120 css px = 30.0 logical px  y 11.5 - 41.5
+ *    1920x1080 scale 6  normal   180 css px = 30.0 logical px  y  9.0 - 39.0
+ *
+ * Worst case is the 89.0 at scale 1, against a floor line at 116 and a
+ * yarn at 160-173. Clear at every scale, with room to spare.
+ *
+ * The `max(30 * unit, 64px)` floor is a READABILITY clamp, not a layout
+ * choice: the box is never allowed to shrink below a height a 9px line
+ * fits in, however small the stage gets. Note that 320x180 and 640x360
+ * both fall under the compact media query below, which uses a 60px floor
+ * and 26 logical px instead — hence the 89.0 above rather than the 68 a
+ * reading of the normal rule alone would predict. */
 #hud .hud-dialogue {
     position: absolute;
-    left: 50%;
+    left: var(--stage-x, 0px);
+    top: calc(30px + 4 * var(--stage-u, 1px));
+    width: min(calc(var(--stage-w, 320px) - 16 * var(--stage-u, 1px)), 720px);
+    margin-left: calc(var(--stage-w, 320px) / 2);
     transform: translateX(-50%);
-    bottom: 12px;
-    width: min(560px, calc(100% - 300px));
-    min-height: 92px;
+    /* 30 logical px of room height, but never below what the text needs */
+    min-height: max(30 * var(--stage-u, 1px), 64px);
+    max-height: max(30 * var(--stage-u, 1px), 64px);
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
+/* Pointer-transparent, so a click anywhere the box sits still reaches the
+   canvas beneath it. #hud is already pointer-events:none and only the
+   sound button opts back in, but the box is sized to sit OVER the
+   playfield now rather than over the page furniture, so it is stated
+   here rather than inherited — the yarn has to be grabbable through it. */
+#hud .hud-dialogue,
+#hud .hud-dialogue * {
+    pointer-events: none;
+}
+
 .dialogue-text {
-    font-size: 14px;
+    /* scales with the room, floored so it stays legible */
+    font-size: max(10px, 3.1 * var(--stage-u, 1px));
     line-height: 1.75;
     color: #fff;
     text-align: center;
@@ -173,14 +219,19 @@ body {
         font-size: 8px;
         padding: 6px 8px;
     }
-    /* Dialogue scales with the viewport: both the box and its type step
-       down together so the line never overflows the frame it sits in. */
+    /* The compact box stays anchored to the playfield's top edge. It only
+     * loses WIDTH here, never the anchoring, because the anchoring is
+     * what keeps the yarn reachable; a narrow box at the top is harmless,
+     * a short box at the bottom hides the floor. The floor of 64px is
+     * kept because it is the readability clamp, not a layout choice. */
     #hud .hud-dialogue {
-        width: min(420px, calc(100% - 40px));
-        min-height: 66px;
+        width: min(calc(var(--stage-w, 320px) - 10 * var(--stage-u, 1px)), 420px);
+        min-height: max(26 * var(--stage-u, 1px), 60px);
+        max-height: max(26 * var(--stage-u, 1px), 60px);
+        top: calc(26px + 3 * var(--stage-u, 1px));
     }
     .dialogue-text {
-        font-size: 10px;
+        font-size: max(9px, 2.9 * var(--stage-u, 1px));
         line-height: 1.7;
     }
     .gate-title {

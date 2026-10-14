@@ -32,11 +32,42 @@
   };
   NESCAT.layout = layout;
 
+  /* Publish the playfield rect to CSS.
+   *
+   * The room is a fixed 320x180 logical buffer blitted to a CENTRED
+   * INTEGER-SCALED rect, but the HUD is positioned in CSS against the
+   * WINDOW. Those are two coordinate systems, and any HUD element sized
+   * in plain CSS pixels therefore covers a DIFFERENT fraction of the room
+   * at every window size — which is exactly how the dialogue box came to
+   * hide the yarn at 1280x720 but not at 800x600.
+   *
+   * So the stage geometry is handed to CSS as custom properties and the
+   * HUD is sized in `--stage-u`, ONE LOGICAL PIXEL expressed in CSS
+   * pixels. Anything expressed in that unit scales with the room for
+   * free: when LOGICAL_W/H double, `scale` doubles, and so does every
+   * HUD measurement derived from it. No breakpoint has to be revisited.
+   *
+   * `--stage-u` is set to `1px * scale` so the arithmetic in CSS reads
+   * as "N logical pixels" rather than as a magic number. */
+  function publishLayout() {
+    var rootEl = root.document && root.document.documentElement;
+    if (!rootEl || !rootEl.style) return;
+    var s = layout.scale;
+    var set = function (k, v) { rootEl.style.setProperty(k, v); };
+    set('--stage-u', s + 'px');                     /* 1 logical px, in CSS px */
+    set('--stage-scale', String(s));
+    set('--stage-x', layout.ox + 'px');
+    set('--stage-y', layout.oy + 'px');
+    set('--stage-w', (CFG.LOGICAL_W * s) + 'px');
+    set('--stage-h', (CFG.LOGICAL_H * s) + 'px');
+  }
+
   function recomputeLayout() {
     var s = Math.floor(Math.min(root.innerWidth / CFG.LOGICAL_W, root.innerHeight / CFG.LOGICAL_H));
     layout.scale = Math.max(CFG.MIN_SCALE, s || CFG.MIN_SCALE);
     layout.ox = Math.floor((root.innerWidth - CFG.LOGICAL_W * layout.scale) / 2);
     layout.oy = Math.floor((root.innerHeight - CFG.LOGICAL_H * layout.scale) / 2);
+    publishLayout();
   }
 
   root.setup = function () {
