@@ -183,7 +183,12 @@ const CASES = [
 const argv = process.argv.slice(2);
 const wantSoak = argv.includes('--soak');
 const soakSeconds = wantSoak ? Number(argv[argv.indexOf('--soak') + 1] || 600) : 0;
+/* --trace [secs]: secs is how long the trace soaks while hunting for rare
+ * states. `watch` fires about three times per 600s, and that rarity is the
+ * whole reason sampling missed it, so the default has to be long enough to
+ * see it or the trace inherits the same blind spot it exists to remove. */
 const wantTrace = argv.includes('--trace');
+const traceSoak = wantTrace ? (Number(argv[argv.indexOf('--trace') + 1]) || 600) : 0;
 const wantSeq = argv.includes('--seq');
 
 /* --seq <state>: print the raw frame sequence for one state, in order and
@@ -227,10 +232,231 @@ function collapse(list) {
   return out.map(o => (o.n > 1 ? o.v + ' x' + o.n : o.v)).join(' ');
 }
 
+/* ---------- --trace : every transition, including the invisible ones -------- */
+
+/* Everything else in this file samples Shiro._sm.state AFTER update() runs, and
+ * that can only ever see states which survive a frame. A state whose enter()
+ * immediately hands off is entered and left inside a single sm.set() call,
+ * before any update() has had a chance to run, so it is INVISIBLE to every
+ * sampler here. `--seq watch` accordingly reported zero watch frames, and a
+ * finding built on that declared the state dead while the selection pool held
+ * three live entries into it.
+ *
+ * So the machine is tapped at sm.set() instead, which records nested calls too.
+ * `depth` counts how many set() calls are still on the stack, so an edge taken
+ * at depth > 0 was taken from inside some enter() — the invisible kind. */
+function tapShiro(Shiro, edges) {
+  const sm = Shiro._sm, real = sm.set.bind(sm);
+  let depth = 0;
+  sm.set = function (name, payload) {
+    if (name === sm.state) return real(name, payload);
+    edges.push({ from: sm.state, to: name, inEnter: depth > 0 });
+    depth++;
+    try { return real(name, payload); }
+    finally { depth--; }
+  };
+  return function untap() { sm.set = real; };
+}
+
+function collapseEdges(edges) {
+  const out = [];
+  for (const e of edges) {
+    const s = e.from + ' -> ' + e.to;
+    const last = out[out.length - 1];
+    if (last && last.s === s) last.n++;
+    else out.push({ s, n: 1, inEnter: e.inEnter });
+  }
+  return out;
+}
+function edgeText(edges) {
+  return collapseEdges(edges).map(o => (o.n > 1 ? o.s + ' x' + o.n : o.s)).join(' ');
+}
+
+/* Runs one CASES entry exactly as the coverage sweep in main() runs it, so the
+ * trace and the check are looking at the same drives. Mirrors that reset
+ * deliberately rather than sharing it: main()'s version is the one that has to
+ * stay exactly as it is, and a helper would be one more thing to get wrong. */
+function driveCase(Shiro, Scene, c, mark) {
+  Scene._yarnX = 104; Scene.food = 1; Scene.water = 1;
+  Scene.isNight = !!c.night;
+  Shiro._sm.set('idle');
+  Shiro.x = c.before ? 0 : 150;
+  if (c.before) c.before(Shiro);
+  if (Shiro._sm.state !== 'idle') Shiro._sm.set('idle');
+  if (c.state === 'sleep') Shiro._awake = 0.3;
+  if (c.state === 'loaf') Shiro._awake = 0.9;
+  const pre = mark();
+  Shiro._sm.set(c.state, c.payload || {});
+  if (c.after) c.after(Shiro);
+  run(Shiro, c.secs);
+  if (c.after) Shiro.petting = false;
+  /* the edge-log length at the moment this case's own entry transition was
+   * about to be made, so the caller can slice out exactly this drive and the
+   * reset's own `X -> idle` edges stay out of the trace. */
+  return pre;
+}
+
+function traceMode(soakSeconds) {
+  const { NESCAT, Scene } = loadShiro();
+  const CFG = NESCAT.config;
+  const Shiro = NESCAT.Shiro;
+  Shiro.init();
+
+  const edges = [];
+  const untap = tapShiro(Shiro, edges);
+  const mark = () => edges.length;
+
+  console.log('\n== TRACE ==');
+  console.log('tapping sm.set() so hand-offs from inside enter() are recorded too.');
+  console.log('an edge tagged (enter) was taken before any update() could have run.');
+
+  /* ---- 1. every CASES entry ---- */
+  const seenIn = {};       /* state -> the case that first reached it */
+  const missingCases = [];
+  console.log('\n-- per CASES entry --');
+  for (const c of CASES) {
+    if (!Shiro._sm.states[c.state]) { missingCases.push(c); continue; }
+    const pre = driveCase(Shiro, Scene, c, mark);
+    const mine = edges.slice(pre);
+    for (const e of mine) if (!(e.to in seenIn)) seenIn[e.to] = c.state;
+    /* an empty line here is not a failure — a case whose state is already the
+     * current one records no entry edge. Say so, or the reader has to guess. */
+    console.log('  ' + (c.state + ' ').padEnd(18, '.') + ' ' +
+      (mine.length ? edgeText(mine) : '(no transitions — she never left ' + c.state + ')'));
+  }
+
+  /* ---- 2. the blind spot, demonstrated on the state that caused it ---- */
+  const wc = CASES.find(k => k.state === 'watch');
+  if (wc && Shiro._sm.states.watch) {
+    /* Count update ticks on which a post-update sampler would have seen
+     * `watch`. This is the number the old instrument reported, and it is the
+     * number a finding was built on. */
+    const { NESCAT: N2, Scene: S2 } = loadShiro();
+    const S = N2.Shiro;
+    S.init();
+    const ticks = {};
+    let last = null;
+    for (let i = 0; i < 60 * wc.secs; i++) {
+      S.update(DT);
+      const st = S._sm.state;
+      ticks[st] = (ticks[st] || 0) + 1;
+      if (st !== last) last = st;
+    }
+    const pre2 = driveCase(Shiro, Scene, wc, mark);
+    const we = edges.slice(pre2);
+
+    console.log('\n-- PROOF: the hand-off no post-update() sampler can see --');
+    console.log('  state            : watch');
+    console.log('  ticks a post-update() sampler observed it on : ' + (ticks.watch || 0));
+    console.log('    (this is the number "--seq watch" reports, and the');
+    console.log('     number the "dead state" finding was built on)');
+    console.log('  the same drive, tapped at sm.set()            :');
+    console.log('      ' + edgeText(we));
+    for (const e of collapseEdges(we)) {
+      if (e.inEnter) console.log('        ^ "' + e.s + '" was taken inside an enter()');
+    }
+    console.log('  transitions INTO watch recorded              : ' +
+      we.filter(e => e.to === 'watch').length);
+    console.log('  _watchDir after (written only by watch.enter): ' + Shiro._watchDir);
+  }
+
+  /* ---- 3. soak, long enough for the rare ones ---- */
+  console.log('\n-- soak ' + soakSeconds + 's --');
+  const beforeSoak = edges.length;
+  for (let i = 0; i < Math.round(soakSeconds / DT); i++) {
+    if (i % 120 === 0) { Scene.food = 1; Scene.water = 1; Scene.isNight = Math.random() < 0.3; }
+    if (i % 900 === 0) Scene.birdSighting = 1; else if (i % 900 === 60) Scene.birdSighting = 0;
+    Shiro._awake = 0.3 + Math.random() * 0.7;
+    Shiro._sinceFood = Math.random() * CFG.BEHAVIOR.foodGap * 1.4;
+    Shiro._sinceWater = Math.random() * CFG.BEHAVIOR.drinkGap * 1.4;
+    Shiro._sinceSleep = Math.random() * CFG.BEHAVIOR.sinceSleepGap * 1.4;
+    try { Shiro.update(DT); }
+    catch (e) { console.log('  THREW at soak step ' + i + ': ' + e.message); break; }
+  }
+  const soakEdges = edges.slice(beforeSoak);
+  const soakTally = {};
+  for (const e of soakEdges) soakTally[e.to] = (soakTally[e.to] || 0) + 1;
+  console.log('  ' + soakEdges.length + ' transitions, ' +
+    Object.keys(soakTally).length + ' distinct states entered');
+  const intoWatch = Object.keys(soakEdges).length ? soakEdges.filter(e => e.to === 'watch') : [];
+  if (intoWatch.length) {
+    console.log('  entered `watch` ' + intoWatch.length + ' time(s) with nobody touching' +
+      ' anything: ' + collapseEdges(intoWatch).map(o => o.s + ' x' + o.n).join('  '));
+  }
+
+  /* ---- 4. account for every state in the machine ---- */
+  const src = fs.readFileSync(path.join(ROOT, 'shiro.js'), 'utf8');
+  const mentions = n => src.split("'" + n + "'").length - 1;
+  /* Self-test. The two "not observed" branches below only run when a state is
+   * missing from the run, which is exactly when something has already gone
+   * wrong — so on a healthy tree they never execute and stay untested. An
+   * unexercised branch in a measurement instrument is the failure this whole
+   * brief exists to end, so prove the counter discriminates before trusting
+   * the table that depends on it. */
+  const stAbsent = mentions('__no_such_state__');
+  const stPresent = mentions('watch');
+  const stOk = stAbsent === 0 && stPresent > 0;
+  console.log('\n-- static scan self-test --');
+  console.log("  mentions('__no_such_state__') = " + stAbsent + '  (want 0)');
+  console.log("  mentions('watch')            = " + stPresent + '  (want > 0)');
+  console.log('  counter discriminates: ' + (stOk ? 'OK' : 'BROKEN — the table below is not evidence'));
+
+  const names = Object.keys(Shiro._sm.states);
+  const observed = [], reachableOnly = [], candidates = [];
+  for (const n of names) {
+    const n1 = soakTally[n] || 0;
+    const n2 = edges.slice(0, beforeSoak).filter(e => e.to === n).length;
+    const total = n1 + n2;
+    const m = mentions(n);
+    if (total > 0) observed.push({ n, total, cases: n2, soak: n1, first: seenIn[n] });
+    else if (m > 0) reachableOnly.push({ n, m });
+    else candidates.push({ n, m });
+  }
+
+  console.log('\n== ACCOUNTING : ' + names.length + ' states in the machine ==');
+  console.log('OBSERVED transitioning (' + observed.length + ')');
+  for (const s of observed.sort((a, b) => a.n.localeCompare(b.n))) {
+    console.log('  ' + s.n.padEnd(18) + String(s.total).padStart(5) + ' transitions   ' +
+      (s.cases ? 'via case `' + s.first + '`' : 'soak only'));
+  }
+  console.log('NOT OBSERVED, but has source-level entry points (' + reachableOnly.length + ')');
+  for (const s of reachableOnly) {
+    console.log('  ' + s.n.padEnd(18) + String(0).padStart(5) + ' transitions   ' +
+      "'" + s.n + "' appears " + s.m + "x in shiro.js — reachable in principle, just rare");
+  }
+  console.log('NO SOURCE ENTRY POINT AND NEVER OBSERVED (' + candidates.length + ')');
+  for (const s of candidates) {
+    console.log('  ' + s.n.padEnd(18) + String(0).padStart(5) + ' transitions   ' +
+      "'" + s.n + "' appears " + s.m + "x in shiro.js — DEAD CANDIDATE");
+  }
+  if (!candidates.length) console.log('  (none)');
+
+  untap();
+
+  if (missingCases.length) {
+    console.log('');
+    console.log('  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    console.log('  !  SILENT SKIP — ' + missingCases.length + ' CASES entr' +
+      (missingCases.length === 1 ? 'y names' : 'ies name') + ' a state the machine lacks:');
+    missingCases.forEach(c => console.log('  !    "' + c.state + '" -> no such state. Covers nothing.'));
+    console.log('  !    Any frame it would have drawn reads as an ORPHAN below,');
+    console.log('  !    and the orphan list reads as a bug in the art. It is not.');
+    console.log('  !    Build the state or delete the case. Never leave it silent.');
+    console.log('  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+  }
+  console.log('\nTRACE OK — ' + names.length + ' states accounted for, ' +
+    observed.length + ' observed, ' + reachableOnly.length + ' reachable-but-unseen, ' +
+    candidates.length + ' dead candidates, ' + soakEdges.length + ' soak transitions');
+}
+
 function main() {
   if (wantSeq) {
     const i = argv.indexOf('--seq');
     dumpSequence(argv[i + 1], Number(argv[i + 2]) || 0);
+    return;
+  }
+  if (wantTrace) {
+    traceMode(traceSoak);
     return;
   }
   const { NESCAT, Scene, calls } = loadShiro();
@@ -242,8 +468,20 @@ function main() {
   const notes = [];
 
   /* ---- 1. every state, entered cold ---- */
+
+  /* A CASES entry naming a state the machine does not have used to be dropped
+   * by a bare `continue`, in silence. The consequence is not cosmetic: the case
+   * covers nothing, so any frame it would have drawn reads as an ORPHAN, and
+   * the orphan list then gets reported as a bug in the art. That has already
+   * cost a cycle. So it is collected and named, loudly, on every run.
+   *
+   * It is a warning rather than a hard failure because one such entry exists
+   * today (`ruffle`), and failing the check over a known-and-named gap would
+   * mean nobody could run the check at all. Naming it is the fix; the removal
+   * of the entry is a decision for whoever owns the state list. */
+  const missingCases = [];
   for (const c of CASES) {
-    if (!Shiro._sm.states[c.state]) continue;         /* not implemented yet */
+    if (!Shiro._sm.states[c.state]) { missingCases.push(c); continue; }
     /* reset to a known place, state and clock */
     Scene._yarnX = 104; Scene.food = 1; Scene.water = 1;
     /* sleeping rolls a chance to wake itself in daylight, so a case that
@@ -274,12 +512,9 @@ function main() {
       const uniq = [...new Set(r.missing.map(m => m.state + ' -> ' + m.frame))];
       uniq.forEach(u => console.log('MISSING  ' + c.state + ': ' + u));
     }
-    if (wantTrace) {
-      console.log('\n== ' + c.state + ' ==');
-      console.log('  path   : ' + r.seenStates.join(' -> '));
-      console.log('  frames : ' + r.unique.join(' '));
-      if (calls.length) console.log('  poked  : ' + calls.map(x => x[0]).join(', '));
-    }
+    /* the old per-case `path / frames / poked` dump used to print here, off
+     * r.seenStates — a post-update() sample, which is the very blind spot
+     * traceMode() exists to remove. --trace is now a mode of its own. */
     if (c.state !== 'idle' && r.seenStates.length > 1) {
       notes.push(c.state + ' -> ' + r.seenStates.slice(1).join(' -> '));
     }
@@ -456,9 +691,30 @@ function main() {
   /* ---- summary ---- */
   console.log('');
   if (notes.length) console.log('paths: ' + notes.join(' | '));
+
+  if (missingCases.length) {
+    console.log('');
+    console.log('  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    console.log('  !  SILENT SKIP — ' + missingCases.length + ' CASES entr' +
+      (missingCases.length === 1 ? 'y names' : 'ies name') + ' a state the machine does not have:');
+    missingCases.forEach(c => console.log('  !    "' + c.state + '" -> no such state. It covers nothing.'));
+    console.log('  !    This used to be dropped without a word. The cost is that any');
+    console.log('  !    frame it would have drawn reads as an ORPHAN, and the orphan');
+    console.log('  !    list reads as a bug in the art. Build the state or delete the');
+    console.log('  !    case — but never let it fail silently again.');
+    console.log('  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+  }
+
+  /* The state count used to be the number of CASES entries that matched a
+   * state, which is coverage, not size — it read "29 states" for a machine with
+   * 31 in it, and the two missing were invisible. Both numbers now, so the gap
+   * between what exists and what is covered cannot be misread as coverage. */
+  const machineStates = Object.keys(Shiro._sm.states).length;
+  const coveredStates = CASES.filter(c => Shiro._sm.states[c.state]).length;
   console.log(bad === 0
-    ? 'ANIMATION CHECK OK — ' + CASES.filter(c => Shiro._sm.states[c.state]).length +
-      ' states, all frames resolve, no view cuts' +
+    ? 'ANIMATION CHECK OK — ' + machineStates + ' states in the machine, ' + coveredStates +
+      ' covered by a CASES entry, all frames resolve, no view cuts' +
+      (missingCases.length ? ', ' + missingCases.length + ' CASES entries skipped (named above)' : '') +
       (orphans.length ? ', ' + orphans.length + ' orphan frames' : '')
     : 'ANIMATION CHECK FAIL — ' + bad + ' problems');
   process.exit(bad === 0 ? 0 : 1);
