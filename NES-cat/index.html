@@ -13,33 +13,26 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div id="stage"></div>
+    <!-- The React shell mounts here. It renders <Canvas>, <Hud> and <Gate>,
+         which is the markup that used to be hand-written below. -->
+    <div id="root"></div>
 
-    <!-- NES.css HUD, floating over the canvas -->
-    <div id="hud">
-        <div class="nes-container is-dark hud-top">
-            <span class="nes-text is-primary" id="cat-name">Shiro</span>
-            <span class="hud-clock" id="clock">--:--</span>
-        </div>
+    <!-- React, the piece, and then p5 — and the ORDER IS THE CONTRACT.
+         React mounts synchronously (see js/react/mount.js) so that #stage
+         exists before p5 boots. p5 in global mode calls window.setup as soon
+         as the document is ready, and sketch.js's setup does
+         `createCanvas(...).parent('stage')`. If React rendered asynchronously
+         the canvas would have nothing to parent to.
 
-        <div class="nes-container is-dark hud-bars">
-            <button id="mute" class="nes-btn hud-btn">SOUND: ON</button>
-        </div>
+         React is loaded from a CDN as UMD, exactly like p5 is below, so the
+         project keeps its no-build property: `npm start` still just serves the
+         directory, and there is still no node_modules and no bundler. -->
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 
-        <div id="dialogue" class="nes-container is-dark hud-dialogue">
-            <p id="dialogue-text" class="dialogue-text">&nbsp;</p>
-        </div>
-    </div>
-
-    <!-- PRESS START gate: also the user gesture that unlocks audio -->
-    <div id="gate" class="gate">
-        <div class="nes-container is-dark gate-box">
-            <p class="gate-title">NES-CAT</p>
-            <p class="gate-sub">a small cat in a cozy room</p>
-            <button id="gate-start" class="nes-btn is-primary gate-btn">PRESS START</button>
-            <p class="gate-hint">click her to be headbutted &middot; drag to carry<br>click the room to play &middot; she naps after dark</p>
-        </div>
-    </div>
+    <script src="js/react/h.js"></script>
+    <script src="js/react/App.js"></script>
+    <script src="js/react/mount.js"></script>
 
     <!-- p5 first, then the piece: order matters (see README).
          Both libraries load from a CDN at the exact versions this was built
