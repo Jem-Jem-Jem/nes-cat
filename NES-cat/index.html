@@ -43,6 +43,13 @@
     <script src="https://cdn.jsdelivr.net/npm/p5.sound@0.4.1/dist/p5.sound.min.js"></script>
 
     <script src="js/config.js"></script>
+    <!-- The room at two resolutions. ADDITIVE: it defines NESCAT.room and
+         nothing reads it yet. Loaded here so that "the game still runs at
+         320x180" is a real test of this file rather than a vacuous one — an
+         unloaded file cannot break the piece precisely because it is not
+         loaded, which is not evidence of anything. Phase 4 is what switches
+         the game to the doubled room. -->
+    <script src="js/room.js"></script>
     <script src="js/palette.js"></script>
     <script src="js/frames.js"></script>
     <script src="js/sprite.js"></script>
