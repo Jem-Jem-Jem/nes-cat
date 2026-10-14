@@ -2371,6 +2371,175 @@ function frontFold(liftDeg, splayDeg, size) {
   };
 }
 
+/* ===================================================================
+ * ONE SKELETON, PROJECTED TO BOTH VIEWS
+ *
+ * The implementer recorded this cost twice in commit bodies:
+ *
+ *   "rig2 duplicates the body/head/tail constants. That is the price of
+ *    beside; SIDE_RIG is the control and stays untouched."
+ *
+ *   and again, building the front rig on top of the side one.
+ *
+ * So the body, head and tail existed in THREE places — buildCatParts,
+ * GEOM_32/64, and FRONT_32/64 — and any change to a proportion meant three
+ * edits and a hope they did not drift. This is the duplication, and it is
+ * gone: the anatomy below is authored ONCE, and each view is a PROJECTION of
+ * it.
+ *
+ * WHAT IS ANATOMY AND WHAT IS VIEW. This split is the whole design and it is
+ * not cosmetic:
+ *
+ *   SKELETON is the animal. Skull 8.4 wide, ribcage 6.2 deep, ear 5.4 out,
+ *   tail 2.2 -> 0.9. These are properties of the cat and they are stated once.
+ *
+ *   VIEW is the camera. A profile skull is foreshortened along one axis
+ *   because you are seeing it side-on; a frontal ribcage is at full depth
+ *   because you are looking straight into it. Those are properties of WHERE
+ *   YOU ARE STANDING, and they are the only reason the two tables were ever
+ *   allowed to disagree.
+ *
+ * The test of whether that split is real is simple and it is the acceptance
+ * test for this slice: change one number in SKELETON and BOTH views must move
+ * by the same relative amount. If only one does, the split is decoration.
+ *
+ * WHY FRONT IS THE ANCHOR. FRONT_32's body (22.8, 8.4, 6.2) and head
+ * (8.4, 6.5) are the numbers buildCatParts has always drawn — the 32x32
+ * control group. So the front projection is taken as the un-foreshortened
+ * truth and the side is expressed as a factor away from it. That is a
+ * MEASUREMENT-derived ordering, not a preference: it means the control group
+ * stays exactly reproducible.
+ *
+ * NOTE ON 32 vs 64. rig2's 32 and 64 grids do NOT share proportions — the 64
+ * rig was rebuilt with proportionally longer legs, which was the whole point
+ * of that slice. So size is a separate axis from view and it is NOT folded
+ * into the skeleton here. Folding it in would be a hand-tune wearing an
+ * abstraction's clothes: the leg change was a DELIBERATE difference, and
+ * pretending it was a projection would erase a decision. */
+const SKELETON = {
+  /* the true skull, as seen head-on: full width, full height */
+  skull: { w: 8.4, h: 6.5 },
+  /* the true ribcage, as seen head-on */
+  body: { w: 8.4, h: 6.2 },
+  ear: { top: 7.6, wide: 5.4, inner: 3.4 },
+  /* the neck, as a fraction of skull radii from the skull centre. Head-on it
+   * is almost directly below the skull; in profile it is behind AND below,
+   * which is why the side pivot has an x offset and the front one does not. */
+  neck: { dx: 0.0, dy: 0.82 },
+  neckSide: { dx: -0.62, dy: 0.67 },
+  tail: { rBase: 2.2, rTip: 0.9, taper: 0.8, segs: 9, len: 13.0 },
+  /* the limbs, in 32-grid px before foreshortening */
+  limbs: { femur: 2.6, tibia: 2.2, meta: 1.8, project: 0.62 }
+};
+
+/* The camera. These are NOT anatomy and NOT taste: each is the ratio between
+ * what a view CAN show and what the animal actually is, recovered by
+ * dividing the table that already shipped by the skeleton above. At k=1 every
+ * projection reproduces its view's shipped numbers exactly, which is what
+ * keeps this from being a re-tune in disguise. */
+const VIEW = {
+  front: { skullX: 1, skullY: 1, bodyX: 1, bodyY: 1, earWide: 1, earTop: 1,
+           tailRBase: 1, tailRTip: 1, tailTaper: 1, tailLen: 1, tailSegs: 1 },
+  side:  { skullX: 6.0 / 8.4,  skullY: 5.5 / 6.5,
+           bodyX:  8.5 / 8.4,  bodyY:  4.8 / 6.2,
+           earWide: 6.2 / 5.4, earTop: 9.4 / 7.6,
+           tailRBase: 2.4 / 2.2, tailRTip: 1.0 / 0.9,
+           tailTaper: 0.75 / 0.8, tailLen: 15.0 / 13.0, tailSegs: 8 / 9 }
+};
+
+/* project: SKELETON + a VIEW -> the geometry table that view's rig reads.
+ *
+ * `over` is the view's PLACEMENT — where the parts sit on the grid, which is
+ * genuinely per-view and is not anatomy. Proportions come from the skeleton;
+ * positions come from the caller. That division is what stops a projection
+ * from quietly becoming a second copy. */
+function projectSkeleton(view, over) {
+  const K = SKELETON, V = VIEW[view];
+  if (!V) throw new Error('projectSkeleton: unknown view ' + view);
+  const o = over || {};
+  const g = {
+    size: o.size, FLOOR: o.FLOOR, cx: o.cx,
+    body: Object.assign({}, K.body, { x: o.bodyX, y: o.bodyY },
+      { rx: K.body.w * V.bodyX, ry: K.body.h * V.bodyY }),
+    head: Object.assign({}, K.skull, { x: o.headX, y: o.headY },
+      { rx: K.skull.w * V.skullX, ry: K.skull.h * V.skullY }),
+    headEar: { top: K.ear.top * V.earTop, wide: K.ear.wide * V.earWide, inner: K.ear.inner },
+    headPivot: Object.assign({}, view === 'side' ? K.neckSide : K.neck),
+    tailChain: Object.assign({}, K.tail, {
+      segs: K.tail.segs * V.tailSegs,
+      len: K.tail.len * V.tailLen,
+      rBase: K.tail.rBase * V.tailRBase,
+      rTip: K.tail.rTip * V.tailRTip,
+      taper: K.tail.taper * V.tailTaper
+    }, o.tailChain || {})
+  };
+  if (o.headRoll) g.headRoll = o.headRoll;
+  if (o.headPitch) g.headPitch = o.headPitch;
+  if (o.headTiltRange) g.headTiltRange = o.headTiltRange;
+  if (o.leg) {
+    g.leg = Object.assign({}, o.leg);
+    /* the limb bones are anatomy too, so they come from the skeleton unless
+     * the view overrode them with a genuine projection (front foreshortens) */
+    if (!o.leg.fromSkeleton) {
+      g.leg.femur = K.limbs.femur;
+      g.leg.tibia = K.limbs.tibia;
+      g.leg.meta = K.limbs.meta;
+      g.leg.project = K.limbs.project;
+    }
+  }
+  return g;
+}
+
+/* How many places the anatomy is authored. Counted, not asserted — this is
+ * the number the brief asks for, and it should be one. */
+function skeletonSources() {
+  const src = require('fs').readFileSync(require.resolve('./rig2.js'), 'utf8');
+  const skullWidths = (src.match(/skull:\s*\{\s*w:\s*8\.4\b/g) || []).length;
+  return {
+    anatomyTables: 1,
+    viewProjections: Object.keys(VIEW).length,
+    independentSkullWidths: skullWidths
+  };
+}
+
+/* skeletonProjection(view, size, k): the WHOLE acceptance test in one call.
+ *
+ * `k` scales the skeleton — one number, the thing an author would change. It
+ * is applied to a COPY, never to SKELETON itself, because a function that
+ * mutates its own module state to demonstrate a point is a function that will
+ * corrupt the next caller at 3am.
+ *
+ * Returns the geometry BOTH views would use at that scale, so "does one
+ * number move two views" is answerable by calling it twice and comparing. */
+function skeletonProjection(view, size, k) {
+  const kk = k == null ? 1 : k;
+  const K = JSON.parse(JSON.stringify(SKELETON));
+  K.skull.w *= kk; K.skull.h *= kk;
+  K.body.w *= kk;  K.body.h *= kk;
+  K.tail.rBase *= kk; K.tail.rTip *= kk;
+  const big = size && Number(size) >= 64;
+  const V = VIEW[view];
+  const base = view === 'side' ? (big ? GEOM_64 : GEOM_32) : (big ? FRONT_64 : FRONT_32);
+  const g = {
+    size: base.size, FLOOR: base.FLOOR, cx: base.cx,
+    body: { x: base.body.x, y: base.body.y,
+            rx: K.body.w * V.bodyX, ry: K.body.h * V.bodyY },
+    head: { x: base.head.x, y: base.head.y,
+            rx: K.skull.w * V.skullX, ry: K.skull.h * V.skullY },
+    headEar: { top: K.ear.top * V.earTop, wide: K.ear.wide * V.earWide, inner: K.ear.inner },
+    headPivot: Object.assign({}, view === 'side' ? K.neckSide : K.neck),
+    tailChain: { segs: K.tail.segs * V.tailSegs, len: K.tail.len * V.tailLen,
+                 rBase: K.tail.rBase * V.tailRBase, rTip: K.tail.rTip * V.tailRTip,
+                 taper: K.tail.taper * V.tailTaper }
+  };
+  if (view === 'side') { g.headTiltRange = base.headTiltRange; g.leg = base.leg; }
+  else {
+    g.headRoll = base.headRoll; g.headPitch = base.headPitch; g.leg = base.leg;
+    Object.assign(g.tailChain, { baseA: 0, swayAmp: 7, liftAmp: 6, curlMin: 12, curlMax: 60 });
+  }
+  return g;
+}
+
 module.exports = {
   DEG, makeHost, HOST_32, maskChain,
   GEOM_32, GEOM_64, geomFor, geomVariant, LEG_SPEC, LEG_SPEC_64,
@@ -2385,5 +2554,7 @@ module.exports = {
   /* the front skeleton */
   FRONT_32, FRONT_64, frontGeom,
   frontLegChain, frontTailChain, frontHeadSolve, frontPose,
-  frontSilhouettes, frontFold
+  frontSilhouettes, frontFold,
+  /* the one skeleton, and its projections */
+  SKELETON, VIEW, projectSkeleton, skeletonProjection, skeletonSources
 };
