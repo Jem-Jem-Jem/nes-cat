@@ -183,8 +183,8 @@ function poseFor(name, size) {
  * Different problems, different code, ONE skeleton. Anything shared is pulled
  * from `g` and nowhere else. */
 
-function paintSide(p, size) {
-  const g = rig2.skeletonProjection('side', size, 1);
+function paintSide(p, size, scale) {
+  const g = rig2.skeletonProjection('side', size, scale == null ? 1 : scale);
   const host = rig2.makeHost(size, size);
   const G = host.grid();
   const Bh = rig2.GEOM_64.BEHAVIOR || null;
@@ -220,8 +220,8 @@ function paintSide(p, size) {
   return G.map(r => r.join(''));
 }
 
-function paintFront(p, size) {
-  const g = rig2.skeletonProjection('front', size, 1);
+function paintFront(p, size, scale) {
+  const g = rig2.skeletonProjection('front', size, scale == null ? 1 : scale);
   const host = rig2.makeHost(size, size);
   const G = host.grid();
 
@@ -258,19 +258,20 @@ function paintFront(p, size) {
 
 /* ---------- emit -------------------------------------------------------- */
 
-function render(name, size) {
+function render(name, size, scale) {
   const p = poseFor(name, size);
-  return p.view === 'side' ? paintSide(p, size) : paintFront(p, size);
+  const k = scale == null ? 1 : scale;
+  return p.view === 'side' ? paintSide(p, size, k) : paintFront(p, size, k);
 }
 
 /* `names` comes from the SHIPPED table, so coverage is measured against what
  * the control group actually produces rather than against a list typed here. */
-function emitAll(names, size) {
+function emitAll(names, size, scale) {
   const out = {};
   const failed = [];
   for (const n of names) {
     try {
-      const rows = render(n, size);
+      const rows = render(n, size, scale);
       if (!rows || !rows.length) { failed.push([n, 'empty']); continue; }
       out[n] = rows;
     } catch (e) {
