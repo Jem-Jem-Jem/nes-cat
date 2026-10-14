@@ -2003,6 +2003,8 @@ if (mode === '--couch') {
 
     const standing = g.FLOOR - top;
     const span = g.PAW_Y - g.HIP_Y;
+    const belly = g.body.y + g.body.ry;
+    const pawBottom = g.PAW_Y + g.leg.front.r[3];
     return {
       label: label, rows: f.rows,
       islands: sizes.length, biggest: sizes[0] || 0, ink: ink,
@@ -2013,13 +2015,30 @@ if (mode === '--couch') {
       headPct: g.head.ry * 2 / standing * 100, ratio: standing / (g.head.ry * 2),
       bridges: parts.map(([n, pm]) => [n, pm ? attachment(all, pm) : null]),
       dev: dev, devAt: devAt, ankle: ankle, knee: knee, clamped: clamped,
-      earR: g.headEar.r || 0, nearFrontX: g.legX.nearFront
+      earR: g.headEar.r || 0, nearFrontX: g.legX.nearFront,
+      /* --- brief 34's four numbers --- */
+      earLen: g.headEar.top - g.head.ry,          /* ear height above the cranium */
+      earWide: g.headEar.wide,
+      tailBase: g.tailChain.rBase, tailTip: g.tailChain.rTip,
+      tailTaper: g.tailChain.rBase / g.tailChain.rTip,
+      tailLen: g.tailChain.len, bodyLen: g.body.rx * 2,
+      tailRatio: g.tailChain.len / (g.body.rx * 2),
+      tailW: [0.15, 0.5, 0.85].map(q => {
+        const ch = rig2.tailChain(rig2.idlePose(g), g);
+        const i = Math.max(0, Math.min(ch.segs - 1, Math.round(q * ch.segs)));
+        return +(ch.radii[i + 1] * 2).toFixed(1);
+      }),
+      belly: belly, pawBottom: pawBottom, visibleLeg: pawBottom - belly,
+      torsoDepth: g.body.ry * 2,
+      /* measured off the DRAWN frame: the frontmost inked column is the front
+       of the face, whatever built it */
+      noseToRump: right - (g.body.x - g.body.rx)
     };
   }
 
   const AR = rig2.COUCH_LEG_ARITHMETIC;
-  const before = measure('BEFORE  (the chosen one)', rig2.CANDIDATE_COUCH_V1);
-  const after = measure('AFTER  (brief 33)', rig2.CANDIDATE_COUCH);
+  const before = measure('BEFORE  (as chosen in brief 33)', rig2.CANDIDATE_COUCH_V1);
+  const after = measure('AFTER  (brief 34)', rig2.CANDIDATE_COUCH);
 
   /* in motion, the fold comes back: walkPose drives paws to TARGETS and
    * carries no tibiaA/metaA, so the two-link solve runs again. The clamp
@@ -2045,6 +2064,26 @@ if (mode === '--couch') {
   const wp = rig2.walkPose(0.25, null, rig2.CANDIDATE_COUCH);
   const walkAnkles = rig2.LEG_KEYS.map(k => rig2.legMask(wp, k, rig2.CANDIDATE_COUCH).bendPx.ankle);
 
+  /* The DEPTH CONTROL: the same lobes, the same sizes, collapsed onto ONE
+   * plane with no plane shading. If these two look similar the depth is
+   * not reading and the claim should be withdrawn — so it is rendered and
+   * measured here rather than asserted. */
+  function headOnly(g) {
+    const h = rig2.makeHost(64, 64);
+    const G = h.grid();
+    const s = rig2.paintHeadForm(G, h, g, rig2.idlePose(g));
+    return { rows: G.map(r => r.join('')), solve: s };
+  }
+  const faceDepth = headOnly(rig2.CANDIDATE_COUCH);
+  const faceFlat = headOnly(rig2.geomVariant(rig2.CANDIDATE_COUCH, {
+    headForm: Object.assign({}, rig2.CANDIDATE_COUCH.headForm, { flat: true })
+  }));
+  const F = rig2.CANDIDATE_COUCH.headForm;
+  const edgeOf = (L) => rig2.CANDIDATE_COUCH.head.x + rig2.CANDIDATE_COUCH.head.rx * (L.x + L.rx);
+  const craniumEdge = edgeOf(F.lobes[0]);
+  const muzzleEdge = edgeOf(F.lobes[2]);
+  const projection = muzzleEdge - craniumEdge;
+
   const pct = v => v.toFixed(1) + '%';
   const px = v => v.toFixed(2) + 'px';
   const bfmt = b => b ? b.pairs + ' pairs / ' + b.across + 'px' : 'n/a';
@@ -2052,7 +2091,7 @@ if (mode === '--couch') {
     : b.pairs <= 9 ? 'thread' : 'real join';
 
   /* ---------- ASCII ---------- */
-  console.log('COUCH - the chosen cat, before and after brief 33\n');
+  console.log('COUCH - before and after briefs 33 and 34\n');
   console.log('  Measured off the drawn frame, not read off the geometry tables.\n');
   const row = (k, a, b) => console.log('  ' + k.padEnd(26) + String(a).padStart(24) +
     String(b).padStart(24) + (String(a) === String(b) ? '' : '   CHANGED'));
@@ -2072,6 +2111,20 @@ if (mode === '--couch') {
   row('max knee fold at rest', px(before.knee), px(after.knee));
   row('legs clamped', before.clamped + '/4', after.clamped + '/4');
   row('ear tip radius', before.earR.toFixed(1) + 'px', after.earR.toFixed(1) + 'px');
+  row('ear height above cranium', before.earLen.toFixed(2) + 'px', after.earLen.toFixed(2) + 'px');
+  row('ear half-width', before.earWide.toFixed(1) + 'px', after.earWide.toFixed(1) + 'px');
+  row('tail base / tip radius', before.tailBase + ' / ' + before.tailTip,
+    after.tailBase + ' / ' + after.tailTip);
+  row('tail taper', before.tailTaper.toFixed(2) + 'x', after.tailTaper.toFixed(2) + 'x');
+  row('tail width along its length', before.tailW.join(' / ') + 'px', after.tailW.join(' / ') + 'px');
+  row('tail length', before.tailLen + 'px', after.tailLen + 'px');
+  row('tail as % of body length', (before.tailRatio * 100).toFixed(1) + '%',
+    (after.tailRatio * 100).toFixed(1) + '%');
+  row('belly line', before.belly.toFixed(1) + 'px', after.belly.toFixed(1) + 'px');
+  row('visible leg (belly->paw)', before.visibleLeg.toFixed(2) + 'px',
+    after.visibleLeg.toFixed(2) + 'px');
+  row('torso depth', before.torsoDepth.toFixed(1) + 'px', after.torsoDepth.toFixed(1) + 'px');
+  row('nose to rump', before.noseToRump.toFixed(1) + 'px', after.noseToRump.toFixed(1) + 'px');
 
   console.log('\n  ATTACHMENT - 4-adjacent pixel pairs bridging each part to the rest.');
   console.log('  An island count cannot tell a sound cat from one hanging by a');
@@ -2093,6 +2146,40 @@ if (mode === '--couch') {
       d.joint + '    hip->knee->ankle->paw: ' +
       d.points.map(p => p.map(v => v.toFixed(2)).join(',')).join('  '));
   });
+
+  console.log('\n  THE FACE: DEPTH, AND THE CONTROL THAT TESTS IT.\n');
+  console.log('    A mouse face is a round skull with features arranged on ONE plane.');
+  console.log('    A cat face in profile has a muzzle that PROJECTS FORWARD of the');
+  console.log('    skull, a visible turn from brow plane to muzzle plane, a nose on');
+  console.log('    the FRONT of the muzzle, and mass under it for the jaw.\n');
+  console.log('    The old face had a "cheek" ellipse reaching 0.6px past the skull.');
+  console.log('    That is not projection, it is a bump on a circle, and it is why');
+  console.log('    she read as a mouse.\n');
+  console.log('    depth        x=' + craniumEdge.toFixed(1) + '  (the cranium front edge)');
+  console.log('    muzzle       x=' + muzzleEdge.toFixed(1) + '  (the muzzle front edge)');
+  console.log('    PROJECTION   ' + projection.toFixed(1) + 'px past the cranium' +
+    (projection > 1 ? '   (was 0.6px)' : '   *** NOT READING ***'));
+  console.log('    head length  ' + (faceDepth.rows.join('').split('\n').length ? '' : '') +
+    'nose to rump ' + after.noseToRump.toFixed(1) + 'px, was ' +
+    before.noseToRump.toFixed(1) + 'px');
+  console.log('');
+  console.log('    The control below is the SAME lobes at the SAME sizes, collapsed');
+  console.log('    onto one plane with no plane shading. If the two look similar the');
+  console.log('    depth is not reading and the claim should be withdrawn.\n');
+  {
+    const FX0 = 30, FX1 = 63;
+    console.log('      DEPTH (the real face)'.padEnd((FX1 - FX0 + 1) * 2 + 4) +
+      'FLAT CONTROL (one plane)');
+    console.log('      ' + '-'.repeat((FX1 - FX0 + 1) * 4 + 6));
+    for (let y = 5; y <= 31; y++) {
+      let a = '', b = '';
+      for (let x = FX0; x <= FX1; x++) {
+        a += faceDepth.rows[y][x] + faceDepth.rows[y][x];
+        b += faceFlat.rows[y][x] + faceFlat.rows[y][x];
+      }
+      console.log('      ' + String(y).padStart(2) + ' ' + a + '  |  ' + b);
+    }
+  }
 
   console.log('\n  LEG LENGTH - the golden-ratio arithmetic in full.\n');
   console.log('    THIS IS A COMPOSITIONAL DEVICE, NOT A FACT ABOUT CATS. A real');
@@ -2205,6 +2292,12 @@ if (mode === '--couch') {
     headPct: +s.headPct.toFixed(1), ratio: +s.ratio.toFixed(2),
     dev: +s.dev.toFixed(2), devAt: s.devAt, ankle: +s.ankle.toFixed(2),
     knee: +s.knee.toFixed(2), clamped: s.clamped, earR: +s.earR.toFixed(1),
+    earLen: +s.earLen.toFixed(2), earWide: +s.earWide.toFixed(1),
+    tailBase: s.tailBase, tailTip: s.tailTip, tailTaper: +s.tailTaper.toFixed(2),
+    tailLen: s.tailLen, bodyLen: s.bodyLen, tailRatio: +s.tailRatio.toFixed(3),
+    tailW: s.tailW, belly: +s.belly.toFixed(1), pawBottom: +s.pawBottom.toFixed(1),
+    visibleLeg: +s.visibleLeg.toFixed(2), torsoDepth: +s.torsoDepth.toFixed(1),
+    noseToRump: +s.noseToRump.toFixed(1),
     bridges: s.bridges.map(([n, v]) => [n, v ? v.pairs : 0, v ? v.across : 0])
   });
 
@@ -2216,6 +2309,7 @@ if (mode === '--couch') {
     '  p.note b{color:#fff}',
     '  .row{display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start}',
     '  .pane{flex:0 0 auto}',
+    '  .pair{display:inline-block;vertical-align:top;margin-right:18px}',
     '  .plab{color:#fff;font-size:14px;margin:0 0 4px}',
     '  .sub{color:#adb5bd;font-size:11px;margin:0 0 8px}',
     '  canvas{image-rendering:pixelated;image-rendering:crisp-edges;background:' + BG + ';border:1px solid #343a40;display:block}',
@@ -2232,6 +2326,7 @@ if (mode === '--couch') {
 var CHAR = __CHAR__, BG = __BG__, S = 5;
 var BEFORE = __BEFORE__, AFTER = __AFTER__;
 var ARITH = __ARITH__, WALK = __WALK__;
+var FACE_D = __FACED__, FACE_F = __FACEF__, PROJ = __PROJ__;
 
 function draw(rows, scale) {
   var c = document.createElement("canvas");
@@ -2270,6 +2365,35 @@ var pics = document.getElementById("pics");
   d.appendChild(draw(s.rows, S));
   pics.appendChild(d);
 });
+
+/* the DEPTH CONTROL, third pane: the same face with its lobes collapsed
+   onto one plane. Same lobes, same sizes, no projection. */
+(function() {
+  var d = document.createElement("div");
+  d.className = "pane";
+  var l = document.createElement("p");
+  l.className = "plab";
+  l.textContent = "FACE DEPTH CONTROL - the flat version";
+  d.appendChild(l);
+  var sub = document.createElement("p");
+  sub.className = "sub";
+  sub.textContent = "same lobes, same sizes, collapsed onto ONE plane. " +
+    "the muzzle projects " + PROJ.toFixed(1) +
+    "px in the real face, 0.6px in the flat one";
+  d.appendChild(sub);
+  var a = document.createElement("div");
+  a.className = "pair";
+  var b = document.createElement("div");
+  b.className = "pair";
+  a.appendChild(draw(FACE_D, 4));
+  b.appendChild(draw(FACE_F, 4));
+  var row = document.createElement("div");
+  row.className = "row";
+  row.appendChild(a);
+  row.appendChild(b);
+  d.appendChild(row);
+  pics.appendChild(d);
+})();
 
 function verdict(p) {
   if (p <= 3) return '  <span class="bad">CORNER TOUCH - reads detached</span>';
@@ -2365,7 +2489,10 @@ document.getElementById("curves").innerHTML = cu;
     .replace('__BEFORE__', payload(before))
     .replace('__AFTER__', payload(after))
     .replace('__ARITH__', JSON.stringify(AR))
-    .replace('__WALK__', JSON.stringify(walkAnkles.map(v => +v.toFixed(2))));
+    .replace('__WALK__', JSON.stringify(walkAnkles.map(v => +v.toFixed(2))))
+    .replace('__FACED__', JSON.stringify(faceDepth.rows))
+    .replace('__FACEF__', JSON.stringify(faceFlat.rows))
+    .replace('__PROJ__', JSON.stringify(+projection.toFixed(2)));
 
   const html = [
     '<!doctype html>',

@@ -1146,14 +1146,183 @@ function headDrift(deg, size) {
  * never reach the frames a frame build emits. */
 /* ---- the head, painted onto G ----
  *
- * Extracted from drawHeadOnCat so a candidate silhouette paints its head
- * with THIS function and not with a second copy. A duplicate of the face
- * would rot the moment the eye, the muzzle or the ear changed, and the
- * candidate's head would quietly stop being the rotatable one. The draw
- * path is one function called from two places; the behaviour is unchanged
- * and is verified by diffing drawHeadOnCat's rows before and after.
+ * TWO FORMS, chosen by the geometry table.
+ *
+ * `paintHeadForm` (g.headForm present) builds the face as a set of masses
+ * at DIFFERENT DEPTHS rather than one outline with a bump on it. That is
+ * the difference between a cat and a mouse in profile: a mouse face is a
+ * round skull with features arranged on ONE plane, and a cat face has a
+ * muzzle that PROJECTS FORWARD of the skull, a visible turn between the
+ * brow and the muzzle, a nose at the FRONT face of the muzzle, and mass
+ * under and behind it for the jaw. Pixel art is a low-resolution
+ * simulation of 3D form; if the depth does not survive the reduction the
+ * form is wrong, and the symptom is a small round head with dots on it.
+ *
+ * `headForm.flat` collapses the same lobes onto one plane and drops the
+ * plane shading. It exists to be the CONTROL: if the flat version does
+ * not look obviously worse next to the real one, the depth is not
+ * reading and the claim should be withdrawn.
+ *
+ * The default form is the older single-skull-plus-cheek construction,
+ * byte for byte, so no geometry that shipped can reach the new branch.
  */
+function paintHeadForm(G, host, g, p) {
+  const head = g.head;
+  const F = g.headForm;
+  const a = (p.headTilt || 0) * DEG;
+  const c = Math.cos(a), s = Math.sin(a);
+  const pv = g.headPivot;
+  const hx = head.x + (p.headDX || 0);
+  const hy = head.y + (p.headDY || 0) + (p.bodyY || 0);
+  const pvx = head.rx * pv.dx, pvy = head.ry * pv.dy;
+  const ppx = hx + pvx, ppy = hy + pvy;
+
+  /* `rot` takes an offset FROM THE SKULL CENTRE, exactly as headSolve
+   * does — it adds the centre back itself. Passing an absolute position
+   * double-counts hx and throws the whole head off the canvas, which
+   * looks like an empty frame and cost a debugging cycle. */
+  const rot = (ox, oy) => {
+    const dx = ox - pvx, dy = oy - pvy;
+    return [ppx + dx * c - dy * s, ppy + dx * s + dy * c];
+  };
+  const abs = (lx, ly) => rot(lx * head.rx, ly * head.ry);
+
+  /* ---- the masses, back to front ----
+   * `z` is forward projection in skull radii: how far the mass sits in
+   * FRONT of the cranium's front edge. It is what the SILHOUETTE shows,
+   * so it is measured, not implied. */
+  const lobes = F.lobes.map(L => ({
+    c: abs(L.x, L.y),
+    rx: L.rx * head.rx, ry: L.ry * head.ry, z: L.z
+  }));
+  const front = lobes.reduce((m, L) => Math.max(m, L.c[0] + L.rx), -999);
+  const back = lobes.reduce((m, L) => Math.min(m, L.c[0] - L.rx), 999);
+  const mz = lobes.reduce((m, L) => (L.z > m.z ? L : m), lobes[0]);
+  const jw = lobes.find(L => L.jaw);
+  const br = lobes.find(L => L.brow);
+
+  /* ONE mask, so the head is one outlined shape carrying internal planes
+   * rather than a pile of separately-outlined circles */
+  const ms = lobes.map(L => host.maskEllipseRot(L.c[0], L.c[1], L.rx, L.ry, a));
+  const face = F.flat
+    /* the CONTROL: the cranium, plus the muzzle drawn ON the skull plane
+     * — the old "cheek bulge" idea, which is exactly what reads as a
+     * mouse. Same lobes, same sizes, no projection, no plane shading. */
+    ? host.maskOr(ms[0], host.maskEllipseRot(lobes[1].c[0] - head.rx * 0.30,
+        lobes[1].c[1], lobes[1].rx, lobes[1].ry, a))
+    : host.maskOr.apply(null, ms);
+  host.paint(G, face, 'W', 'K');
+
+  /* ---- the plane breaks, which is the depth made visible ---- */
+
+  /* 1. the OCCLUSION shadow under the muzzle: where it overhangs the jaw
+   *    that surface cannot see the light and goes dark. The strongest cue
+   *    available, because it is the one that says "this piece of the face
+   *    is IN FRONT of that piece". */
+  const under = host.emptyMask();
+  if (!F.flat && mz && jw) {
+    for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++) {
+      if (!face[y][x]) continue;
+      const dx = x + 0.5 - mz.c[0], dy = y + 0.5 - mz.c[1];
+      const t = (dx * dx) / (mz.rx * mz.rx) + (dy * dy) / (mz.ry * mz.ry);
+      if (t > 1) continue;
+      if (dy > -mz.ry * 0.10 && dx < -mz.rx * 0.05) under[y][x] = true;
+    }
+    host.paint(G, under, 'H', 'H');
+  }
+
+  /* 2. the STOP: the turn from brow plane to muzzle plane, visible on the
+   *    silhouette as a dark notch where the two planes meet. */
+  const stop = host.emptyMask();
+  if (!F.flat && br && mz) {
+    for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++) {
+      if (!face[y][x] || under[y][x]) continue;
+      const dyb = (y + 0.5 - br.c[1]) / br.ry;
+      const dym = (y + 0.5 - mz.c[1]) / mz.ry;
+      if (dyb > 0.35 && dyb < 1.05 && dym < -0.05 && x + 0.5 > br.c[0]) stop[y][x] = true;
+    }
+    host.paint(G, stop, 'H', 'H');
+  }
+
+  /* 3. general form shading below the cheek line, as everywhere else */
+  if (!F.flat) host.shadeBelow(G, face, hx, hy + head.ry * F.shadeFrom, 'H');
+
+  /* ---- ears ----
+   *
+   * The ear POINTS come from headSolve, not from a second calculation
+   * here. Computing them again would be a copy that rots the moment the
+   * ear changed, and the candidate's head would quietly stop being the
+   * rotatable one — which is exactly the failure this file already
+   * records having had once. One source of truth: headSolve. */
+  const E = g.headEar;
+  const hs = headSolve(p, g);
+  const triL = host.maskTri(hs.earL[0][0], hs.earL[0][1], hs.earL[1][0], hs.earL[1][1],
+                            hs.earL[2][0], hs.earL[2][1]);
+  const triR = host.maskTri(hs.earR[0][0], hs.earR[0][1], hs.earR[1][0], hs.earR[1][1],
+                            hs.earR[2][0], hs.earR[2][1]);
+  host.paint(G, E.r
+    ? host.maskOr(triL, host.maskEllipse(hs.earApexL[0], hs.earApexL[1], E.r, E.r))
+    : triL, 'W', 'K');
+  host.paint(G, E.r
+    ? host.maskOr(triR, host.maskEllipse(hs.earApexR[0], hs.earApexR[1], E.r, E.r))
+    : triR, 'W', 'K');
+  host.px(G, hs.pinkL[0], hs.pinkL[1], 'P');
+  host.px(G, hs.pinkR[0], hs.pinkR[1], 'P');
+
+  /* ---- the eye: a ROTATED ellipse, set BACK and HIGH beside the brow
+   *    rather than centred on the face. A large centred eye is the mouse
+   *    tell. */
+  const e = abs(F.eye[0], F.eye[1]);
+  const eyeM = host.maskEllipseRot(e[0], e[1], head.rx * F.eye[2], head.ry * F.eye[3], a);
+  for (let y = 0; y < host.H; y++) for (let x = 0; x < host.W; x++)
+    if (eyeM[y][x] && face[y][x]) G[y][x] = 'E';
+  /* the catchlight, up and forward: a highlight on the NEAR surface is
+   * the second depth cue, because it says which surface is nearer */
+  host.px(G, e[0] + head.rx * 0.05, e[1] - head.ry * 0.11, 'W');
+
+  /* ---- the nose: the FRONT FACE of the muzzle, not a mark on a plane.
+   *    It sits at the muzzle's leading edge. ---- */
+  let n = abs(F.nose[0], F.nose[1]);
+  if (F.flat) {
+    /* In the control the muzzle does not project, so a nose placed at the
+     * PROJECTED muzzle's leading edge falls off the collapsed face and
+     * vanishes — which would make the control look BROKEN rather than
+     * flat. Pin it to the flat face's own front edge so the only
+     * difference between the two is depth, not a missing part. */
+    const ny = Math.round(n[1]);
+    let ex = -1;
+    for (let x = 59; x >= 0; x--) if (face[ny] && face[ny][x]) { ex = x; break; }
+    if (ex >= 0) n = [ex - 0.5, n[1]];   /* pxIn rounds, so aim INSIDE */
+  }
+  const pxIn = (x, y, ch) => {
+    const xi = Math.round(x), yi = Math.round(y);
+    if (xi < 0 || xi >= host.W || yi < 0 || yi >= host.H) return;
+    if (face[yi][xi]) G[yi][xi] = ch;
+  };
+  pxIn(n[0], n[1], 'N');
+  /* the philtrum running back and down from the nose to the lip, on the
+   * FRONT plane so it is lighter than the shadow behind it */
+  pxIn(n[0] - head.rx * 0.10, n[1] + head.ry * 0.16, 'M');
+  pxIn(n[0] - head.rx * 0.18, n[1] + head.ry * 0.30, 'M');
+
+  /* The return keeps headSolve's SHAPE, because that is the contract every
+   caller of drawCandidate().solve already reads — pivot, earR, skull,
+   nose. Returning a different shape would silently break the rotatable
+   head's contract while the art still looked right, which is the worst
+   possible failure. The form-specific extras ride alongside. */
+  return {
+    angle: hs.angle, pivot: hs.pivot, centre: hs.centre, skull: hs.skull,
+    cheek: hs.cheek, earL: hs.earL, earR: hs.earR,
+    earApexL: hs.earApexL, earApexR: hs.earApexR, earRnd: hs.earRnd,
+    pinkL: hs.pinkL, pinkR: hs.pinkR, eye: hs.eye, nose: hs.nose,
+    face: face, front: front, back: back,
+    muzzle: mz, muzzlePoint: n, eyePoint: e,
+    form: F.flat ? 'flat' : 'depth'
+  };
+}
+
 function paintHead(G, host, g, p) {
+  if (g.headForm) return paintHeadForm(G, host, g, p);
   const head = g.head;
   const s = headSolve(p, g);
   const a = (p.headTilt || 0) * DEG;
@@ -1541,18 +1710,114 @@ const CANDIDATE_COUCH = geomVariant(GEOM_64, {
      means the paw no longer reaches the old floor line, so the floor
      line moves with it rather than leaving her floating. */
   FLOOR: 56.0, LEG_TOP: 43.0, HIP_Y: 44.0, PAW_Y: 53.3,
-  body: { x: 28.0, y: 37.0, rx: 17.0, ry: 10.5 },
+  /* 2. TORSO, re-settled against the legs brief 33 shortened.
+   *
+   * It is NOT an independent shape, and the evidence is arithmetic. The
+   * paw's bottom sits at PAW_Y + the paw radius = 53.3 + 2.5 = 55.8 and
+   * FLOOR is 56, so the paws are ON the floor. The leg span is 9.3px, so
+   * the belly that makes the VISIBLE leg equal the leg span belongs at
+   * 55.8 - 9.3 = 46.5. It was at 47.5, which showed a leg 1.0px shorter
+   * than the leg the rig is actually drawing.
+   *
+   * So the torso drops 0.5px and slims 10.5 -> 10.0, landing the belly
+   * on 46.5 and the visible leg on 9.3px exactly.
+   *
+   * The second constraint pulls the other way: the belly must also COVER
+   * the hips, or brief 33's front-leg fix is undone. So the attachment is
+   * measured rather than assumed. Slimming takes the near-front bridge
+   * from 10 pixel pairs across 9px to 9 pairs across 8px; measured as a
+   * multiple of the limb's own width, which is the honest test, that is
+   * 1.50x -> 1.33x, well clear of the 0.30x that read as detached. rx
+   * stays 17 so the chest still covers the near-front hip at x=41 with
+   * room to spare. The whole change is one ellipse 1px shallower. */
+  body: { x: 28.0, y: 36.5, rx: 17.0, ry: 10.0 },
   head: { x: 45.0, y: 22.0, rx: 11.0, ry: 10.2 },
-  /* 4. */
-  headEar: { top: 13.5, wide: 12.5, inner: 8.6, pink: [7.4, 10.8], r: 2.8 },
-  /* 1. nearFront 45 -> 41 */
+  /* 4. EARS - shorter AND round.
+   *
+   * The previous pass set an apex radius of 2.8 on an ear still 3.3 skull
+   * radii long, which rounded the TIP of a spike and left the spike. A
+   * short rounded ear is a different shape, not a different end: E.top
+   * drops 13.5 -> 12.2, so the ear stands 2.0 skull radii above the
+   * cranium instead of 3.3 - a 39% cut - and the apex radius rises
+   * 2.8 -> 3.3 so the round dominates what is left. The circle is OR-ed
+   * into the triangle's OWN mask, so the ear stays one outlined shape and
+   * cannot leave the floating speck a bare apex produces. */
+  headEar: { top: 12.2, wide: 10.8, inner: 8.0, pink: [7.0, 9.8], r: 3.3 },
+  /* 3. THE FACE, as depth rather than outline.
+   *
+   * Each lobe is a mass at a different DEPTH, given in skull radii:
+   *   x, y   where it sits, as a fraction of the skull radii
+   *   rx, ry its size, as a fraction of the skull radii
+   *   z      how far it projects FORWARD of the cranium's front edge.
+   *          This is the number the change turns on. The old face's
+   *          "cheek" ellipse reached 0.6px past the skull, which is not
+   *          projection, it is a bump. The muzzle here reaches 5.1px, so
+   *          the SILHOUETTE carries the depth rather than a shading trick
+   *          painted inside a fixed outline.
+   *
+   * cranium z 0.0  the skull mass, the deepest thing
+   * brow    z 0.4  the plane above and forward of the cranium
+   * muzzle  z 1.0  projects forward of everything; the cat's tell
+   * jaw     z 0.6  mass UNDER and BEHIND the muzzle
+   * cheek   z 0.2  mass under the eye, carrying the lower skull
+   *
+   * The nose sits at the muzzle's LEADING EDGE, so it reads as the front
+   * face of a projecting mass rather than a dot painted on a plane. The
+   * eye is set back and high beside the brow, because a large centred eye
+   * is the mouse tell.
+   *
+   * `flat: true` collapses these same lobes onto ONE plane and drops the
+   * plane shading. It is the CONTROL for the depth test: same lobes, same
+   * sizes, no projection. */
+  headForm: {
+    lobes: [
+      /* the cranium is the FULL skull ellipse, unchanged. An earlier
+       * attempt shrank it to 0.95 to leave room for the brow, which
+       * dropped its underside 0.5px and opened a 1.18px gap between the
+       * jaw and the chest at x=43.7 — the head came off as a 384px
+       * island. It is the MUZZLE that has to project, not a smaller
+       * skull; the cranium must stay big enough to meet the body. */
+      { x: -0.12, y: -0.02, rx: 1.00, ry: 1.00, z: 0.0 },
+      { x: 0.40, y: -0.38, rx: 0.60, ry: 0.52, z: 0.4, brow: true },
+      { x: 0.74, y: 0.16, rx: 0.58, ry: 0.50, z: 1.0 },
+      { x: 0.34, y: 0.52, rx: 0.52, ry: 0.34, z: 0.6, jaw: true },
+      { x: -0.22, y: 0.40, rx: 0.56, ry: 0.48, z: 0.2 }
+    ],
+    nose: [1.12, 0.10],
+    eye: [-0.04, -0.30, 0.115, 0.26],
+    shadeFrom: 0.30
+  },
   legX: { nearFront: 41.0, farBack: 15.0, nearBack: 25.0, farFront: 34.0 },
   padRow: 55,
   /* the toes have to stick OUT past the paw ball or they are invisible:
      tof + r is how far the toe reaches from the paw point, and the ball
      is only 2.50, so each toe protrudes and makes a scallop. */
   paw: { toes: 3, tof: 2.6, spread: 50, aim: 70, r: 1.05 },
-  tailChain: { x: 14.0, y: 33.0, len: 22.0, rBase: 3.4, rTip: 1.2, baseA: 64, idleCurl: 130, idleBias: 0.25 },
+  /* 2b. TAIL - re-derived, because it was chosen against a cat that no
+   * longer exists.
+   *
+   * GIRTH. The old chain ran 3.4 -> 1.2, a 2.83x taper, putting the width
+   * at 5.9 / 4.4 / 2.4px along its length: fat, then tapered, then a
+   * point. That is a cone. A tail is a TUBE with a gentle taper, and the
+   * root being fuller than the tip is all the taper it needs. 2.8 -> 1.9
+   * is 1.47x, which measures 5.6 / 5.0 / 4.3px - three widths within
+   * 1.3px of each other instead of a 3.5px collapse. The root at 5.6px is
+   * also about the same as a thigh (2 x 2.8), which is what makes it
+   * read as attached rather than stuck on.
+   *
+   * LENGTH. The old 22px was picked against a 34px torso, before the legs
+   * shortened (12.0 -> 9.3) and the torso re-settled. Re-derived: a cat's
+   * tail is roughly the length of the body from shoulder to rump, which is
+   * 34px here, but a LOAF cat holds hers curled and this chain spends 130
+   * degrees of turn doing it, so the drawn arc is a fraction of the
+   * anatomical length. 26px is 0.765 of the body, up from 22px and 0.647.
+   * It went LONGER, not shorter, and the reason is in the face: with the
+   * muzzle projecting 5.1px past the cranium she is 48.5px nose to rump
+   * instead of 46.5, and a longer animal wants a longer tail. Verified to
+   * fit - 26px clears the canvas at every base angle from 52 to 96
+   * degrees. The base moves to y=36 to sit on the settled rump. */
+  tailChain: { x: 14.0, y: 36.0, len: 26.0, rBase: 2.8, rTip: 1.9, taper: 0.8,
+               baseA: 64, idleCurl: 130, idleBias: 0.25 },
   /* 3. NEAR-VERTICAL BONES. Absolute angles in the 0 = straight down
      convention: the tibia leads slightly BACK (the hock), the
      metatarsus slightly FORWARD off it, and the two cancel to 0.19px,
@@ -1698,7 +1963,7 @@ module.exports = {
   solveLeg, legMask, rig2Legs, drawFrame, measureStanding,
   lerpPose, walkPose, bentPose, tuckPose, groomPose, solveLegAngles,
   dirTail, tailChain, tailPose, curvatureProfile, drawTailOnCat,
-  headSolve, headTiltPose, headDrift, drawHeadOnCat, paintHead, oldPoseAsVector, walkPoseFromOldCycle,
+  headSolve, headTiltPose, headDrift, drawHeadOnCat, paintHead, paintHeadForm, oldPoseAsVector, walkPoseFromOldCycle,
   footPath, LEG_KEYS, legAt, GAIT, frac,
   toeMask, torsoMask, drawCandidate, idlePose, restDeviation, geomForIdle,
   CANDIDATES, CANDIDATE_COUCH, CANDIDATE_COUCH_V1, CANDIDATE_SHEER, CANDIDATE_KITTEN,
