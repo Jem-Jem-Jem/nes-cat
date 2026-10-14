@@ -1957,6 +1957,420 @@ const CANDIDATES = [
   }
 ];
 
+/* ===================================================================
+ * THE FRONT SKELETON
+ *
+ * Eighteen slices went into the side rig and the front rig got none of it.
+ * Everything above here is profile: a chain tail, an IK leg, a head that
+ * rotates about a neck. The front cat is still what buildCatParts() has
+ * always drawn — two ellipses moved by `legPhase`, a hardcoded bezier, a head
+ * ellipse that translates and never rotates — and that is the 32x32 CONTROL
+ * GROUP. It stays exactly as it is. This is the counterpart, beside it.
+ *
+ * A front view is not the side view transliterated. Three things genuinely
+ * differ, and each is a different problem rather than a different number:
+ *
+ *   LEGS   Profile legs SWING: the hip angle drives the paw fore and aft
+ *          along the ground. Front legs SPLAY: they open away from the
+ *          midline and come back together, and the whole leg is foreshortened
+ *          because you are looking down it rather than across it. The same
+ *          bones project to a much shorter span.
+ *
+ *   TAIL   A profile tail hangs behind the body and reads against the legs.
+ *          A front tail comes toward the viewer and leaves the midline — a
+ *          cat's tail is almost never straight behind her. So the chain gets
+ *          an explicit SIDE SIGN. This is the first place asymmetry is
+ *          genuinely allowed in this rig, and the mirror-symmetry rule was
+ *          removed from the checker in 0f9145a to permit exactly this.
+ *
+ *   HEAD   A profile tilt is a rotation in the picture plane: rotate the
+ *          skull about the neck and the face travels with it. A FRONTAL tilt
+ *          is a different projection problem. Leaning the head toward the
+ *          viewer foreshortens it along the view axis, and the features do
+ *          NOT stay put — the eyes and nose migrate toward the chin as more
+ *          of the top of the skull comes into view. Squashing the skull alone
+ *          leaves the eyes floating in the middle of a flattened head, which
+ *          is why a naive frontal tilt looks wrong. So pitch carries the
+ *          features with it.
+ * =================================================================== */
+
+/* The front grid. Deliberately NOT derived from GEOM_32/64 by inheritance:
+ * a front cat is a different animal, and inheriting the profile numbers is
+ * how a transliteration happens by accident. These are stated outright. */
+const FRONT_32 = {
+  size: 32,
+  FLOOR: 29.0,
+  cx: 16,
+  body: { y: 22.8, rx: 8.4, ry: 6.2 },
+  head: { x: 16, y: 10.5, rx: 8.4, ry: 6.5 },
+  /* the neck, as a fraction of skull radii from the skull centre. In profile
+   * this is well off-centre (dx -0.62) because the neck is behind the skull.
+   * Head-on the neck is almost directly BELOW it — that is the whole reason a
+   * frontal tilt looks different, and reusing the profile pivot would swing
+   * the face sideways when the cat asked for a nod. */
+  headPivot: { dx: 0.0, dy: 0.82 },
+  headRoll: { min: -26, max: 26 },
+  headPitch: { min: -34, max: 34 },
+  headEar: { top: 7.6, wide: 5.4, inner: 3.4 },
+  /* Front legs. `project` is the foreshortening: looking down the leg, the
+   * vertical extent of each bone shrinks by roughly cos of the viewing angle
+   * off the axis. `splay` is the resting opening angle from vertical. */
+  leg: {
+    femur: 2.6, tibia: 2.2, meta: 1.8,
+    project: 0.62,
+    r: [1.7, 1.5, 1.35, 1.5],
+    hipX: 4.6, hipY: 24.4,
+    splay: 11, splayMax: 34,
+    liftLimit: 14,
+    bend: -1
+  },
+  tailChain: { segs: 9, len: 13.0, rBase: 2.2, rTip: 0.9, taper: 0.8,
+               baseA: 0, swayAmp: 7, liftAmp: 6, curlMin: 12, curlMax: 60 }
+};
+
+const FRONT_64 = Object.assign({}, FRONT_32, {
+  size: 64,
+  FLOOR: 58.0,
+  body: { y: 45.6, rx: 16.8, ry: 12.4 },
+  head: { x: 32, y: 21.0, rx: 16.8, ry: 13.0 },
+  headEar: { top: 15.2, wide: 10.8, inner: 6.8 },
+  leg: Object.assign({}, FRONT_32.leg, {
+    femur: 5.2, tibia: 4.4, meta: 3.6,
+    r: [3.4, 3.0, 2.7, 3.0],
+    hipX: 9.2, hipY: 48.8,
+    splay: 11, splayMax: 34,
+    liftLimit: 28
+  }),
+  tailChain: Object.assign({}, FRONT_32.tailChain, {
+    segs: 10, len: 26.0, rBase: 4.4, rTip: 1.8,
+    swayAmp: 7, liftAmp: 6, curlMin: 12, curlMax: 60
+  })
+});
+
+function frontGeom(size) {
+  if (!size) return FRONT_32;
+  if (typeof size === 'object') return size;
+  return Number(size) >= 64 ? FRONT_64 : FRONT_32;
+}
+
+/* ---------- front legs ------------------------------------------------
+ *
+ * Same chain, genuinely different problem.
+ *
+ * `solveLeg` drives the paw by a hip ANGLE, because in profile the hip angle
+ * IS the gait: swing forward, swing back, and the foot follows the arc. Front
+ * legs have no arc to follow. They open from the midline, they foreshorten,
+ * and the thing that actually moves a front paw is its TARGET — up, down, and
+ * across the midline when it crosses the chest.
+ *
+ * So this takes a paw target in board space and solves onto it, with the splay
+ * as the free parameter the side rig used to spend on the gait. That is what
+ * makes the two not transliterations of each other: the side rig can reach a
+ * point along an arc, this one can reach a point in a plane.
+ *
+ * `side` is +1 for the cat's right as drawn (screen +x) and -1 for her left.
+ * It flips the splay, so the two legs mirror by construction rather than by
+ * two hand-written copies that can drift apart. */
+function frontLegChain(p, g, side) {
+  const L = g.leg;
+  const s = side >= 0 ? 1 : -1;
+  const cx = g.cx != null ? g.cx : g.body.x;
+
+  /* hip: fixed on the torso, splayed out from the midline */
+  const hipX = cx + s * L.hipX;
+  const hipY = (L.hipY || 0) + (p.bodyY || 0);
+
+  /* resting splay, plus whatever the pose asks for, clamped */
+  const splay = ((L.splay || 0) + (p.splayDeg || 0)) * DEG;
+  const splayClamped = Math.max(-(L.splayMax || 30) * DEG, Math.min((L.splayMax || 30) * DEG, splay));
+
+  /* Foreshortening. In profile each bone's length is its drawn length. Here
+   * the leg points at the camera, so what you SEE of a bone is its length
+   * times the cosine of how far off the view axis it points — and a splayed
+   * leg points further off axis than one held vertical. That coupling is the
+   * thing a transliteration loses: splay and foreshortening are not two
+   * independent knobs. */
+  const proj = k => Math.max(1e-3, (L.project == null ? 1 : L.project) * Math.cos(splayClamped * k));
+  const femur = L.femur * proj(0.85);
+  const tibia = L.tibia * proj(0.6);
+  const meta = L.meta * proj(0.3);
+
+  /* knee sits down the femur along the splayed direction */
+  const sa = Math.sin(splayClamped), ca = Math.cos(splayClamped);
+  const kx = hipX + s * sa * femur;
+  const ky = hipY + ca * femur;
+
+  /* paw target. Defaults to standing; the pose may raise it, and may carry
+   * it ACROSS the midline, which is the case a side rig cannot express at
+   * all because a profile leg has no "across". */
+  const standX = cx + s * (L.hipX || 0) * 1.45;
+  const standY = (g.FLOOR || 29);
+  let pawX = p.pawX == null ? standX : cx + (p.pawX || 0);
+  let pawY = p.pawY == null ? standY : p.pawY;
+
+  /* a raised paw comes up toward the chest, never below the floor */
+  const lift = p.liftDeg || 0;
+  if (lift) {
+    pawY -= Math.abs(Math.sin(lift * DEG)) * (L.liftLimit || 0);
+    pawX += -s * Math.sin(lift * DEG) * (L.liftLimit || 0) * 0.45;
+  }
+
+  /* two-link solve onto the target, same maths as the side rig, different
+   * question: reach a POINT rather than follow an ARC. */
+  let dx = pawX - kx, dy = pawY - ky;
+  let d = Math.hypot(dx, dy);
+  const reach = (tibia + meta) * 0.999;
+  if (d > reach) { dx *= reach / d; dy *= reach / d; d = reach; }
+  if (d < 1e-6) { dx = 0; dy = 1e-6; d = 1e-6; }
+  /* the knee can only fold one way */
+  const cosA = Math.max(-1, Math.min(1, (tibia * tibia + meta * meta - d * d) / (2 * tibia * meta)));
+  const base = Math.atan2(-dx, dy);
+  const tibiaA = base + (L.bend || -1) * Math.acos(cosA);
+
+  const ankle = [kx + Math.sin(tibiaA) * tibia, ky + Math.cos(tibiaA) * tibia];
+  const paw = [ankle[0] + Math.sin(tibiaA + (L.bend || -1) * 0.9) * meta,
+               ankle[1] + Math.cos(tibiaA + (L.bend || -1) * 0.9) * meta];
+
+  const points = [[hipX, hipY], [kx, ky], ankle, paw];
+  /* radii taper toward the paw but the paw itself stays a little fatter,
+   * because a front paw seen head-on is a round pad, not a point. */
+  const radii = L.r.slice(0, 4);
+
+  /* how far the ankle leaves the straight hip-to-paw chord. This is the
+   * number that says whether the joint is real or a shorter straight stick. */
+  let bendPx = 0;
+  {
+    const hx = hipX, hy = hipY;
+    const ex = paw[0] - hx, ey = paw[1] - hy;
+    const el = Math.hypot(ex, ey) || 1e-6;
+    for (const q of [points[1], points[2]]) {
+      const proj = Math.abs((q[0] - hx) * ey - (q[1] - hy) * ex) / el;
+      if (proj > bendPx) bendPx = proj;
+    }
+  }
+
+  return {
+    points, radii, side: s,
+    splay: splayClamped / DEG,
+    tibiaA: tibiaA / DEG,
+    bendPx,
+    /* the bones as DRAWN, which is what the projection cost */
+    drawn: { femur, tibia, meta },
+    /* what the bones are in the body — the budget, unchanged by viewpoint */
+    actual: { femur: L.femur, tibia: L.tibia, meta: L.meta },
+    paw: paw
+  };
+}
+
+/* ---------- front tail ------------------------------------------------
+ *
+ * The same segmented, tapering, interpolating chain the side has — and a
+ * SIDE SIGN, which is the entire difference that matters here.
+ *
+ * A front tail is seen coming toward the viewer and sits to one side. With
+ * sideSign +1 it leaves the midline to the right; with -1, to the left. That
+ * is the first genuinely asymmetric thing this rig can draw, and it is legal:
+ * the mirror-symmetry requirement was removed from the checker in 0f9145a,
+ * which left CONNECTED as the rule that catches a broken frame instead.
+ *
+ * The tail also wraps in DEPTH rather than just in the picture plane, so the
+ * chain gets a depth per segment: the base starts near the body and the tip
+ * comes forward. Depth is what makes a front tail read as a tail and not as a
+ * wire taped to her side. */
+function frontTailChain(p, g) {
+  const T = g.tailChain;
+  const n = T.segs;
+  const seg = (p.tailLen == null ? T.len : p.tailLen) / n;
+  const sign = (p.tailSide == null ? 1 : (p.tailSide >= 0 ? 1 : -1));
+
+  /* where it leaves the body: the hip line, offset to one side */
+  const cx = g.cx != null ? g.cx : g.body.x;
+  const y0 = g.body.y + (p.bodyY || 0) + (g.body.ry || 0) * 0.55;
+  const x0 = cx + sign * (g.body.rx || 8) * (p.tailOut == null ? 0.55 : p.tailOut);
+
+  /* The base angle is measured OFF THE MIDLINE, so it is already signed —
+   * unlike the side tail, whose base is off straight-back. */
+  const baseDeg = (p.tailLift == null ? 0 : p.tailLift) * DEG;
+  const curlTotal = (p.tailCurl == null ? 0 : p.tailCurl) * DEG * sign;
+  const k = 1 + 6 * Math.max(0, Math.min(1, p.tailBias || 0));
+
+  const w = []; let wsum = 0;
+  for (let i = 0; i < n; i++) { const v = Math.pow((i + 1) / n, k); w.push(v); wsum += v; }
+
+  const points = [[x0, y0]];
+  const radii = [T.rBase];
+  let x = x0, y = y0, a = baseDeg;
+  for (let i = 0; i < n; i++) {
+    /* outward and up: dx is signed by the side, dy is always upward */
+    const dx = Math.cos(a) * sign, dy = -Math.sin(Math.abs(a));
+    x += dx * seg;
+    y += dy * seg;
+    points.push([x, y]);
+    a += curlTotal * (w[i] / wsum);
+    const f = (i + 1) / n;
+    radii.push(T.rTip + (T.rBase - T.rTip) * Math.pow(1 - f, T.taper));
+  }
+  return { points, radii, segs: n, side: sign };
+}
+
+/* ---------- front head that tilts -------------------------------------
+ *
+ * A profile tilt is a rotation in the picture plane. A frontal tilt is not,
+ * and that is the whole point of building this rather than reusing headSolve.
+ *
+ * There are two degrees here, not one:
+ *
+ *   ROLL  about the neck, in the plane of the screen. One ear goes down, the
+ *         other up. This is the tilt you can do on the side rig today.
+ *
+ *   PITCH toward or away from the viewer. This foreshortens the skull along
+ *         the view axis AND moves the face. Lean a cat's head toward you and
+ *         you see more of the top of the skull; the eyes and nose slide DOWN
+ *         toward the chin, and the chin tucks. Squash the skull without
+ *         moving the features and you get eyes floating in the middle of a
+ *         flattened head — which is exactly what a naive frontal tilt looks
+ *         like, and exactly what this avoids.
+ *
+ * The features migrate as a fraction of the foreshortening, not as a separate
+ * constant, because the two are the same event seen two ways: as the skull
+ * flattens by cos(pitch), the face travels with it. */
+function frontHeadSolve(p, g) {
+  const head = g.head, E = g.headEar;
+  const hx = head.x + (p.headDX || 0);
+  const hy = head.y + (p.headDY || 0) + (p.bodyY || 0);
+  const pv = g.headPivot;
+
+  const roll = (p.headRoll || 0) * DEG;
+  const pitch = (p.headPitch || 0) * DEG;
+
+  /* the neck, in board space */
+  const nx = hx + head.rx * pv.dx;
+  const ny = hy + head.ry * pv.dy;
+
+  /* PITCH: foreshorten the skull vertically. cos(0)=1 (full face), and
+   * cos(90)=0 would be edge-on — so the drawn height collapses toward the
+   * pivot as she leans away. Clamped because past ~70 degrees the skull is a
+   * line and the features have nowhere to sit. */
+  const pitchC = Math.max(0.30, Math.cos(pitch));
+
+  /* where the face travels to. The face rides DOWN the skull as pitch
+   * increases, and the drop is measured against the skull's own height so it
+   * shrinks as the skull shrinks. */
+  const faceDrop = head.ry * (1 - pitchC) * 0.92;
+
+  const c = Math.cos(roll), s = Math.sin(roll);
+  const rot = (ox, oy) => {
+    const dx = ox - head.rx * pv.dx;
+    const dy = oy - head.ry * pv.dy;
+    return [nx + dx * c - dy * s, ny + dx * s + dy * c];
+  };
+  const tri = pts => pts.map(q => rot(q[0], q[1]));
+
+  const ry = head.ry * pitchC;
+  return {
+    roll: p.headRoll || 0,
+    pitch: p.headPitch || 0,
+    pitchC,
+    pivot: [nx, ny],
+    centre: [hx, hy],
+    skull: rot(0, faceDrop),
+    skullRy: ry,
+    earL: tri([[-head.rx * 0.66, -ry * 0.66 - faceDrop * 0.5], [-E.wide, -E.top - faceDrop * 0.5], [-head.rx * 0.12, -ry * 0.94 - faceDrop * 0.5]]),
+    earR: tri([[head.rx * 0.66, -ry * 0.66 - faceDrop * 0.5], [E.wide, -E.top - faceDrop * 0.5], [head.rx * 0.12, -ry * 0.94 - faceDrop * 0.5]]),
+    /* THE PART A SQUASH WOULD GET WRONG: the eyes and the nose ride the
+     * pitch, so they stay on the face instead of drifting out of it. */
+    eyeL: rot(-head.rx * 0.34, -ry * 0.16 + faceDrop),
+    eyeR: rot(head.rx * 0.34, -ry * 0.16 + faceDrop),
+    nose: rot(0, head.ry * 0.22 + faceDrop),
+    muzzle: rot(0, head.ry * 0.34 + faceDrop),
+    /* chin tucks under as she leans toward you */
+    chin: rot(0, head.ry * 0.72 + faceDrop)
+  };
+}
+
+/* A front pose is a point in a space, so it has to be continuous in t. None
+ * of these are authored per frame. */
+function frontPose(t, size, side) {
+  const g = frontGeom(size);
+  const u = frac(t);
+  const T = g.tailChain;
+  /* `side` matters and is not a mirror shortcut. A front cat's two legs are
+   * NOT doing the same thing — one reaches across the chest while the other
+   * takes the weight. Driving both legs from one pose is how a front rig ends
+   * up a side rig wearing a different mask, which is precisely what this slice
+   * exists to stop. So the pose is authored PER SIDE. */
+  const s = side == null ? 1 : (side >= 0 ? 1 : -1);
+  /* the near leg reaches and crosses; the far one plants and splays */
+  const nearReach = Math.max(0, Math.sin(2 * Math.PI * u));
+  return {
+    bodyY: 0,
+    headDX: 0, headDY: 0,
+    headRoll: g.headRoll.max - (g.headRoll.max - g.headRoll.min) * (0.5 - 0.5 * Math.cos(2 * Math.PI * u)),
+    headPitch: g.headPitch.max - (g.headPitch.max - g.headPitch.min) * (0.5 - 0.5 * Math.cos(2 * Math.PI * u + 1.1)),
+    splayDeg: (6 * Math.sin(2 * Math.PI * u)) + s * 4,
+    /* the crossing happens on the near leg only, and it crosses the midline —
+     * `pawX` is measured from the centre, so a negative value on the near side
+     * puts the paw on the FAR side of the chest, which no profile rig can ask
+     * for at all because a profile leg has no "across". */
+    liftDeg: s > 0
+      ? g.leg.liftLimit * (nearReach ** 2)
+      : g.leg.liftLimit * 0.12 * (1 - nearReach),
+    pawX: s > 0 ? (-2.6 * nearReach) : null,
+    pawY: null,
+    tailSide: 1,
+    tailOut: 0.55,
+    tailLift: T.liftAmp * 0.4 + T.liftAmp * 0.35 * Math.cos(2 * Math.PI * u),
+    tailCurl: T.curlMin + (T.curlMax - T.curlMin) * (0.5 - 0.5 * Math.cos(2 * Math.PI * u)),
+    tailBias: 0.25 + 0.5 * u
+  };
+}
+
+/* Distinct silhouettes across a sweep. This is the number that says whether a
+ * rig interpolates or whether it is a handful of authored poses with extra
+ * steps — the same measurement the side slices reported, run over the front. */
+function frontSilhouettes(samples, size) {
+  const seen = new Set();
+  const n = samples || 100;
+  for (let i = 0; i < n; i++) {
+    const g = frontGeom(size);
+    const p = frontPose(i / n, size, 1);
+    const q = frontPose(i / n, size, -1);
+    const L = frontLegChain(p, g, 1);
+    const R = frontLegChain(q, g, -1);
+    const T = frontTailChain(p, frontGeom(size));
+    const H = frontHeadSolve(p, frontGeom(size));
+    seen.add(JSON.stringify([
+      L.points.map(q => q.map(v => Math.round(v * 4) / 4)),
+      R.points.map(q => q.map(v => Math.round(v * 4) / 4)),
+      T.points.map(q => q.map(v => Math.round(v * 4) / 4)),
+      H.skull.map(v => Math.round(v * 4) / 4),
+      H.eyeL.map(v => Math.round(v * 4) / 4)
+    ]));
+  }
+  return { distinct: seen.size, samples: n };
+}
+
+/* Fold measurements, in px. A front leg that reads as jointed moves its knee
+ * off the straight hip-to-paw chord; one that is a shorter straight stick
+ * does not. Same question the side rig asks, asked of a different geometry. */
+function frontFold(liftDeg, splayDeg, size) {
+  const g = frontGeom(size);
+  const base = { bodyY: 0, liftDeg: liftDeg || 0, splayDeg: splayDeg || 0 };
+  const L = frontLegChain(base, g, 1);
+  const stand = frontLegChain({ bodyY: 0 }, g, 1);
+  /* leg span as a share of standing height, measured not estimated */
+  const span = Math.abs(L.paw[1] - L.points[0][1]);
+  const height = (g.FLOOR || 29) - (g.head.y - g.head.ry);
+  return {
+    bendPx: L.bendPx,
+    standSpanPx: Math.abs(stand.paw[1] - stand.points[0][1]),
+    spanPx: span,
+    legSharePct: height ? (span / height) * 100 : 0,
+    drawn: L.drawn,
+    actual: L.actual
+  };
+}
+
 module.exports = {
   DEG, makeHost, HOST_32, maskChain,
   GEOM_32, GEOM_64, geomFor, geomVariant, LEG_SPEC, LEG_SPEC_64,
@@ -1967,5 +2381,9 @@ module.exports = {
   footPath, LEG_KEYS, legAt, GAIT, frac,
   toeMask, torsoMask, drawCandidate, idlePose, restDeviation, geomForIdle,
   CANDIDATES, CANDIDATE_COUCH, CANDIDATE_COUCH_V1, CANDIDATE_SHEER, CANDIDATE_KITTEN,
-  COUCH_LEG_ARITHMETIC
+  COUCH_LEG_ARITHMETIC,
+  /* the front skeleton */
+  FRONT_32, FRONT_64, frontGeom,
+  frontLegChain, frontTailChain, frontHeadSolve, frontPose,
+  frontSilhouettes, frontFold
 };

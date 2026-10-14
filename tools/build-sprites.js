@@ -2974,6 +2974,45 @@ if (mode === '--check') {
   const useOld = process.argv.indexOf('--old') >= 0;
   const LEGS_R2 = rig2.LEG_KEYS;
 
+  /* --view front: the FRONT skeleton. Nothing in the build reaches this branch
+   * — it lives after the frame build, in the preview dispatch, exactly like
+   * rig2 itself. The front rig is a different animal from the profile one (it
+   * splays rather than swings, and its head pitch foreshortens rather than
+   * rotating), so it gets its own preview rather than being shoehorned into
+   * drawFrame(), which knows only about profile legs and a profile head. */
+  const viewArg = process.argv.indexOf('--view');
+  if (viewArg >= 0 && process.argv[viewArg + 1] === 'front') {
+    const FG = rig2.frontGeom(N);
+    console.log('rig2 FRONT at ' + N + 'x' + N +
+      '   splay ' + FG.leg.splay + 'deg (max ' + FG.leg.splayMax + ')' +
+      '  roll +/-' + FG.headRoll.max + 'deg  pitch +/-' + FG.headPitch.max + 'deg' +
+      '  tail ' + FG.tailChain.segs + ' segs');
+    for (const t of at) {
+      const g2 = rig2.frontGeom(N);
+      const L = rig2.frontLegChain(rig2.frontPose(t, N, 1), g2, 1);
+      const R = rig2.frontLegChain(rig2.frontPose(t, N, -1), g2, -1);
+      const p = rig2.frontPose(t, N, 1);
+      const T = rig2.frontTailChain(p, FG);
+      const H = rig2.frontHeadSolve(p, FG);
+      console.log('\n== front t=' + t.toFixed(3) + ' ==');
+      console.log('  head roll ' + H.roll.toFixed(1) + 'deg  pitch ' + H.pitch.toFixed(1) +
+        'deg  -> skull height x' + H.pitchC.toFixed(3) +
+        '   eye moved ' + (H.eyeL[1] - H.centre[1]).toFixed(2) + 'px from skull centre');
+      console.log('  near leg splay ' + L.splay.toFixed(1) + 'deg  fold off the chord ' +
+        L.bendPx.toFixed(2) + 'px  paw ' + L.paw.map(v => v.toFixed(1)).join(',') +
+        '   far leg splay ' + R.splay.toFixed(1) + 'deg');
+      console.log('  tail ' + T.segs + ' segs  side ' + (T.side > 0 ? 'right' : 'left') +
+        '  tip (' + T.points[T.points.length - 1].map(v => v.toFixed(1)).join(',') + ')');
+      console.log('  bones as drawn: femur ' + L.drawn.femur.toFixed(2) +
+        ' tibia ' + L.drawn.tibia.toFixed(2) + ' meta ' + L.drawn.meta.toFixed(2) +
+        '  (authored ' + FG.leg.femur + '/' + FG.leg.tibia + '/' + FG.leg.meta + ')');
+    }
+    const sil = rig2.frontSilhouettes(200, N);
+    console.log('\n  ' + sil.distinct + ' distinct silhouettes across ' + sil.samples +
+      ' phases (front skeleton interpolates, it is not a pose table)');
+    return;
+  }
+
   console.log('rig2 at ' + N + 'x' + N +
     '   hip y=' + G.HIP_Y + '  paw y=' + G.PAW_Y +
     '  leg span ' + (G.PAW_Y - G.HIP_Y).toFixed(1) + 'px');
