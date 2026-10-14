@@ -30,6 +30,21 @@
   var NESCAT = (root.NESCAT = root.NESCAT || {});
   var h = NESCAT.h;
   var Fragment = NESCAT.Fragment;
+  var React = root.React;
+
+  /* Read the imperative store the way React expects to read an external
+   * source. useSyncExternalStore is built for exactly this case: an external
+   * mutable source read during render, with no tearing and no "React state is
+   * the real thing, the store is a copy" drift. The third argument is the
+   * server snapshot, which this app never uses, but returning the same frozen
+   * object is correct for it too. */
+  function useStore() {
+    return React.useSyncExternalStore(
+      NESCAT.store.subscribe,
+      NESCAT.store.get,
+      NESCAT.store.get
+    );
+  }
 
   /* ---------- <Canvas> --------------------------------------------------
    *
@@ -50,34 +65,42 @@
   /* ---------- <Hud> ------------------------------------------------------
    * The title bar, the sound button and the dialogue box.
    *
-   * Rendered once with the same initial text the static markup had. ui.js
-   * looks these nodes up by id and writes to them directly, so they must
-   * exist before p5's setup() calls NESCAT.UI.init() — which the flushSync
-   * mount guarantees. */
+   * Every piece of text here is React's, read from the store ui.js publishes
+   * into. ui.js attaches its click handlers to these nodes by id — the nodes
+   * are React's, the behaviour is not, and a button with a listener on it is
+   * still owned by whoever rendered it. */
   function Hud() {
+    var s = useStore();
     return h('div', { id: 'hud' },
       h('div', { className: 'nes-container is-dark hud-top' },
-        h('span', { className: 'nes-text is-primary', id: 'cat-name' }, 'Shiro'),
-        h('span', { className: 'hud-clock', id: 'clock' }, '--:--')
+        h('span', { className: 'nes-text is-primary', id: 'cat-name' }, s.name),
+        h('span', { className: 'hud-clock', id: 'clock' }, s.clock)
       ),
       h('div', { className: 'nes-container is-dark hud-bars' },
-        h('button', { id: 'mute', className: 'nes-btn hud-btn' }, 'SOUND: ON')
+        h('button', { id: 'mute', className: 'nes-btn hud-btn' + (s.muted ? ' is-off' : '') },
+          s.muted ? 'SOUND: OFF' : 'SOUND: ON')
       ),
       h('div', { id: 'dialogue', className: 'nes-container is-dark hud-dialogue' },
         /* NBSP, not a plain space: the static markup used &nbsp; so the line
-         * box survives before ui.js types anything into it. A collapsing
-         * space would be a different box on the first frame. */
-        h('p', { id: 'dialogue-text', className: 'dialogue-text' }, ' ')
+         * box survives before anything is said. A collapsing space would be a
+         * different box on the first frame. */
+        h('p', { id: 'dialogue-text', className: 'dialogue-text' },
+          s.dialogue + (s.typing ? '▮' : ''))
       )
     );
   }
 
   /* ---------- <Gate> -----------------------------------------------------
    * PRESS START. Also the user gesture that unlocks audio, which is why it
-   * cannot become a passive overlay — the click handler ui.js attaches is
-   * load-bearing, not decoration. */
+   * cannot become a passive overlay — ui.js's click handler is load-bearing,
+   * not decoration.
+   *
+   * `is-hidden` used to be a class added to a DOM node. React owns the class
+   * now, so the dismiss is a reconciliation like everything else here; the
+   * CSS transition behind it is untouched. */
   function Gate() {
-    return h('div', { id: 'gate', className: 'gate' },
+    var s = useStore();
+    return h('div', { id: 'gate', className: 'gate' + (s.started ? ' is-hidden' : '') },
       h('div', { className: 'nes-container is-dark gate-box' },
         h('p', { className: 'gate-title' }, 'NES-CAT'),
         h('p', { className: 'gate-sub' }, 'a small cat in a cozy room'),

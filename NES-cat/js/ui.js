@@ -27,17 +27,18 @@
 
     init: function () {
       var d = document;
+      /* Only the two nodes this file still has a BEHAVIOUR for. Everything it
+       * used to look up — the name, the clock, the dialogue text, the gate —
+       * is React's now, and reaching for them here would be two owners
+       * fighting over one node. See js/react/store.js. */
       this.els = {
-        gate: d.getElementById('gate'),
         gateBtn: d.getElementById('gate-start'),
-        dialogue: d.getElementById('dialogue'),
-        dialogueText: d.getElementById('dialogue-text'),
-        name: d.getElementById('cat-name'),
-        clock: d.getElementById('clock'),
         mute: d.getElementById('mute')
       };
 
-      if (this.els.name) this.els.name.textContent = CFG.CAT_NAME;
+      /* The name is config, and config.js loads AFTER the shell mounts, so it
+       * travels through the store rather than being read at render time. */
+      NESCAT.store.set({ name: CFG.CAT_NAME });
 
       var self = this;
 
@@ -46,7 +47,10 @@
         this.els.gateBtn.addEventListener('click', function () { self.begin(); });
       }
       root.addEventListener('keydown', function (e) {
-        if (self.els.gate && !self.els.gate.classList.contains('is-hidden') &&
+        /* read the gate's state from the store rather than off its className:
+         * the class is React's output now, and asking the DOM what React
+         * believes is a round trip that can go stale */
+        if (!NESCAT.store.get().started &&
             (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault();
           self.begin();
@@ -70,17 +74,17 @@
     },
 
     begin: function () {
-      if (this.els.gate) this.els.gate.classList.add('is-hidden');
+      NESCAT.store.set({ started: true });
       NESCAT.Audio.start();
       this.refreshMute();
       this.say('start');
     },
 
+    /* React renders; this publishes. See js/react/store.js — imperative code
+     * writes into the store and never touches a rendered node's text, so there
+     * is exactly one owner per piece of text and it is React. */
     refreshMute: function () {
-      if (!this.els.mute) return;
-      var m = NESCAT.Audio.muted;
-      this.els.mute.textContent = m ? 'SOUND: OFF' : 'SOUND: ON';
-      this.els.mute.classList.toggle('is-off', m);
+      NESCAT.store.set({ muted: !!NESCAT.Audio.muted });
     },
 
     say: function (key) {
@@ -100,7 +104,7 @@
       this._gap = 2.2;
       /* each line starts its own little melody */
       if (NESCAT.Audio && NESCAT.Audio.resetVoice) NESCAT.Audio.resetVoice();
-      if (this.els.dialogueText) this.els.dialogueText.textContent = '';
+      NESCAT.store.set({ dialogue: '' });
     },
 
     update: function (dt) {
@@ -151,20 +155,21 @@
       this.updateClock();
     },
 
+    /* The cursor is React's job: it renders `text + (typing ? '▮' : '')`. All
+     * this publishes is the string and whether it is still growing, so the
+     * component owns the one character the CSS and the eye agree on. */
     setDialogue: function (text, typing) {
-      if (!this.els.dialogueText) return;
-      this.els.dialogueText.textContent = text + (typing ? '▮' : '');
+      NESCAT.store.set({ dialogue: text, typing: !!typing });
     },
 
     updateClock: function () {
-      if (!this.els.clock) return;
       var h = NESCAT.Scene.hour;
       var hh = Math.floor(h);
       var mm = Math.floor((h - hh) * 60);
       var label = (hh % 12 === 0 ? 12 : hh % 12) + ':' + (mm < 10 ? '0' : '') + mm +
                   (hh < 12 ? 'am' : 'pm');
       var phase = NESCAT.Scene.isNight ? 'night' : 'day';
-      this.els.clock.textContent = label + ' · ' + phase;
+      NESCAT.store.set({ clock: label + ' · ' + phase });
     }
   };
 
