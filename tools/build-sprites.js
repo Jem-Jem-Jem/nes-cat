@@ -3000,15 +3000,17 @@ if (mode === '--rig2-frames64') {
    *    sit_open      -> sit_front      sitting up
    *    loaf_0        -> curled_side    the tucked pose
    *
-   * idle_closed is deliberately NOT redirected: the redraw has one front idle
-   * and no closed-eye variant, and shipping idle_closed identical to idle_open
-   * is the same defect the old rig2 64 set had (its idle_closed and idle_open
-   * were byte-identical, so she could not blink). The blink still drops to the
-   * old closed pose for its closed beat, and that gap is stated rather than
-   * papered over.
+   * idle_closed IS redirected, and it has to be. Measured: with idle_open and
+   * idle_blink_mid on the redraw and idle_closed left on the old rig2 art, the
+   * blink cycle alternates between TWO DIFFERENT CATS - the new one on the
+   * open beats, the old blob on the closed beat. A flicker between two
+   * drawings is worse than either alone, and it is the one wiring defect this
+   * measurement actually exposed. She now holds the same face through the
+   * whole blink and stops blinking. That is a real loss, stated rather than
+   * hidden: there is no closed-eye redraw yet, and inventing one here would be
+   * art, which this brief forbids.
    *
-   * THE OTHER 84 ARE UNTOUCHED. Only four names are replaced; the rest still
-   * come from rig2-frames.js exactly as before.
+   * THE OTHER 82 ARE UNTOUCHED and are still the old malformed rig2 art.
    *
    * AND IT THROWS INSTEAD OF QUIETLY DOING NOTHING. A substitution that does
    * not land - a renamed frame, a missing pose, a pose that came back the
@@ -3019,6 +3021,7 @@ if (mode === '--rig2-frames64') {
   const REDRAWN = {
     idle_open: 'idle_front',
     idle_blink_mid: 'idle_front',
+    idle_closed: 'idle_front',
     side_stand_0: 'idle_side',
     sit_open: 'sit_front',
     loaf_0: 'curled_side'
