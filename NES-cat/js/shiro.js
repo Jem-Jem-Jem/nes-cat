@@ -83,10 +83,34 @@
 
   /* ---------- lifecycle ------------------------------------------------- */
 
+  /* THE SCALE OF THIS FILE'S OWN LITERALS.
+   *
+   * shiro.js is drawn OUTSIDE the transform that sketch.js wraps around
+   * Scene.draw, and that is correct: her frames are already 64x64 art, so
+   * scaling her would draw her at 128. The consequence, which is the whole
+   * bug, is that EVERY number in this file is read as ROOM coordinates while
+   * the literals written here are 320-space.
+   *
+   * scale.js doubles the constants that live on NESCAT.Scene, which is why
+   * FEET_Y, WALK_MIN_X and BODY_HALF all follow the room. The numbers written
+   * literally in this file were never in that set, so nothing doubled them -
+   * and the two lines below sat next to each other with one of each:
+   *
+   *     this.x = 150;                              320-space, never doubled
+   *     this.y = NESCAT.Scene.FEET_Y - 28;          FEET_Y doubled, the 28 not
+   *
+   * At 640x360 that put her at x=150 of 640 - a quarter of the way across a
+   * room twice as wide, standing on bare floor to the left of the rug instead
+   * of on it - with her sprite bottom 28px below the floor line.
+   *
+   * Multiplied by the scale rather than recomputed from the room, because the
+   * default has to render EXACTLY as it did: 150 * 1 is 150. */
   Shiro.init = function () {
+    var sc = NESCAT.SCALE || 1;
     this.sprite = NESCAT.Sprite.makeSprite({ name: 'shiro', frames: NESCAT.frames });
-    this.x = 150;
-    this.y = NESCAT.Scene.FEET_Y - 28;   /* sprite row 28 is her bottom */
+    this.x = 150 * sc;
+    this._targetX = 150 * sc;
+    this.y = NESCAT.Scene.FEET_Y - 28 * sc;   /* sprite row 28 is her bottom */
     this.load();
     this.buildStateMachine();
     this._flourishGap = U.rand(CFG.BEHAVIOR.flourishMin, CFG.BEHAVIOR.flourishMax);
