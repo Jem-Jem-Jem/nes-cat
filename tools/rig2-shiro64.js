@@ -64,6 +64,24 @@ function stroke(h, Gx, x0, y0, x1, y1, ch) {
     h.px(Gx, Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n), ch);
 }
 function toes(h, Gx, x, y, spread) { for (let i = -1; i <= 1; i++) h.px(Gx, Math.round(x + i * spread), Math.round(y), PINK); }
+
+/* A ROUNDED SQUARE, not an ellipse.
+ *
+ * Measured off idle_open: rows 5..13 are 20, 18, 20, 20, 16, 16, 16, 14, 14 -
+ * the sides hold their width for five rows before it narrows. An ellipse
+ * narrows immediately from its top. That difference is most of why the redraw
+ * read as a different animal: the original's head is a soft square, mine was a
+ * circle. `k` is the corner radius as a fraction of the half-width. */
+function maskRoundRect(h, cx, cy, rx, ry, k) {
+  const m = h.emptyMask();
+  const r = Math.min(rx, ry) * (k == null ? 0.55 : k);
+  for (let y = 0; y < h.H; y++) for (let x = 0; x < h.W; x++) {
+    const dx = Math.abs(x + 0.5 - cx), dy = Math.abs(y + 0.5 - cy);
+    const ox = Math.max(0, dx - (rx - r)), oy = Math.max(0, dy - (ry - r));
+    if (dx <= rx && dy <= ry && ox * ox + oy * oy <= r * r) m[y][x] = true;
+  }
+  return m;
+}
 function legReach(b) { return b.femur + b.tibia + b.meta; }
 function hipFor(b, pawY, fold) { return pawY - legReach(b) * (fold == null ? 0.97 : fold); }
 
@@ -113,33 +131,32 @@ function drawHead(h, Gx, o) {
     return [H.cx + (rx * ca - ry * sa), H.cy + (rx * sa + ry * ca)];
   };
 
-  /* EARS: the ORIGINAL's ears, not better ones. Measured off idle_open at
-   * 32x32 - tips at rows 2..3, sloping outward and down to a base that merges
-   * with the skull by row 8, with a pink inner. They are SMALL TRIANGLES at the
-   * top corners, about a quarter of the head's width. Brief 51 rounded them and
-   * a human rejected the result, so they are triangles again: not improved,
-   * reproduced. */
-  const eH = H.ry * (front ? 0.80 : 0.72);
+  /* EARS: the ORIGINAL's ears. Measured off idle_open rows 2..8 - SHORT and
+   * BLUNT (4 rows tall at 32, so 8 at 64), sitting CLOSE TOGETHER near the
+   * middle of the top of the head and angling only slightly outward. The
+   * redraw's ears were tall thin spikes splayed to the outer corners, which is
+   * a different animal's ears. Base inside the skull so they merge. */
+  const eH = H.ry * (front ? 0.82 : 0.70);
   const eW = H.rx * (front ? 0.30 : 0.22);
-  const ex = H.rx * (front ? 0.62 : 0.44);
+  const ex = H.rx * (front ? 0.40 : 0.26);
   const specs = front
-    ? [[H.cx - ex, H.cy - H.ry * 0.62, eW, eH], [H.cx + ex, H.cy - H.ry * 0.62, eW, eH]]
+    ? [[H.cx - ex, H.cy - H.ry * 0.45, eW, eH], [H.cx + ex, H.cy - H.ry * 0.45, eW, eH]]
     : [[H.cx - ex, H.cy - H.ry * 0.55, eW * 0.9, eH]];
   for (const [ax, ay, aw, ah] of specs) {
     /* base INSIDE the skull so the ear merges with it. The first attempt put
      * the base ON the skull's top edge, which left them floating above her head
      * as detached pink flecks. */
-    const tipx = ax + (ax < H.cx ? -aw * 0.5 : aw * 0.5);
+    const tipx = ax + (ax < H.cx ? -aw * 0.30 : aw * 0.30);
     const m = h.maskTri(ax - aw, ay, ax + aw, ay, tipx, ay - ah);
     h.paint(Gx, m, WHITE, INK);
-    fillMask(h, Gx, h.maskTri(ax - aw * 0.5, ay, ax + aw * 0.5, ay, tipx, ay - ah * 0.68), PINK);
+    fillMask(h, Gx, h.maskTri(ax - aw * 0.55, ay, ax + aw * 0.55, ay, tipx, ay - ah * 0.66), PINK);
   }
 
   /* skull: the measured proportion. idle_open's head is 20 wide of a 21 wide
    * figure and 14 tall, so rx is NEARLY HALF the figure width. The earlier
    * pass used rx 12.5 at 64 - 37% too small - which is most of why the redraw
    * did not read as her. */
-  h.paint(Gx, h.maskEllipse(H.cx, H.cy, H.rx, H.ry), WHITE, INK);
+  h.paint(Gx, maskRoundRect(h, H.cx, H.cy, H.rx, H.ry, front ? 0.50 : 0.55), WHITE, INK);
 
   /* NO brow band. Row 8 of the original reads KKKKWWWWWWWWWWWWKKKK - black at
    * the EDGES only, which is the skull's own outline and not a bar. Painting a
@@ -160,29 +177,41 @@ function drawHead(h, Gx, o) {
    * plane break. In PROFILE it is the light grey #ced4da, not white - the
    * original's muzzle is a distinctly paler grey than her body, and drawing it
    * white is what made the profile read as a beak. */
+  /* THE MUZZLE. The original's front muzzle is a flat light band LOW on the face
+   * (idle_open row 13, x 9..22), and its profile muzzle is a small light-grey
+   * wedge at the front (side_walk_0 rows 15..17). It is NOT a raised blob.
+   *
+   * The redraw painted a big ellipse over the skull, and because host.paint()
+   * outlines whatever it fills, that outline became a dark ring sitting on her
+   * chest like a bowtie - the single most obviously wrong thing in the first
+   * side-by-side. So: no outline on the muzzle, and it stays INSIDE the head. */
   const [mx, my] = rot(M.cx, M.cy);
   const muz = h.maskEllipse(mx, my, M.rx, M.ry);
-  h.paint(Gx, muz, front ? WHITE : MUEZZLE, INK);
-  fillMask(h, Gx, maskBox(h, mx - M.rx, my - M.ry * 0.72, mx + M.rx, my - M.ry * 0.34), GREY);
-  fillMask(h, Gx, maskBox(h, mx - M.rx * 0.66, my + M.ry * 0.44, mx + M.rx * 0.66, my + M.ry * 0.92), DARK);
-  fillMask(h, Gx, h.maskEllipse(mx, my + M.ry * 0.04, M.rx * 0.88, M.ry * 0.78), front ? WHITE : MUEZZLE);
+  fillMask(h, Gx, muz, front ? WHITE : MUEZZLE);
+  if (!front) fillMask(h, Gx, maskBox(h, mx - M.rx * 0.7, my - M.ry, mx + M.rx * 0.7, my + M.ry), MUEZZLE);
+  /* the chin: a small grey under the nose, which is all the original has */
+  fillMask(h, Gx, maskBox(h, mx - M.rx * 0.42, my + M.ry * 0.30, mx + M.rx * 0.42, my + M.ry * 1.1), GREY);
 
   /* eyes: LOW and WIDE apart, which is the original's whole expression.
    * Two columns three rows tall. */
+  /* EYES: measured off idle_open rows 10..12 - E at x10..11 and x19..20, two
+   * columns THREE pixels tall, low on the face (rows 10-12 of a 2..15 head) and
+   * 8 columns apart. The redraw's were wide rectangles twice the size, set far
+   * apart at mid-face. */
   const open = o.eyeOpen == null ? 1 : o.eyeOpen;
   if (front) {
     const dx = H.rx * 0.40;
     for (const s of [-1, 1]) {
-      const [px, py] = rot(H.cx + s * dx, H.cy + H.ry * 0.14);
-      if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.6, py - 3.0, px + 1.6, py + 3.0), INK);
-      else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.6, py - 0.8, px + 1.6, py + 2.4), INK);
-      else stroke(h, Gx, px - 2.4, py, px + 2.4, py, INK);
+      const [px, py] = rot(H.cx + s * dx, H.cy + H.ry * 0.22);
+      if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.4, py - 3.0, px + 1.4, py + 3.0), INK);
+      else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.4, py - 0.6, px + 1.4, py + 2.0), INK);
+      else stroke(h, Gx, px - 2.2, py, px + 2.2, py, INK);
     }
   } else {
-    const [px, py] = rot(H.cx + H.rx * 0.30, H.cy + H.ry * 0.16);
-    if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.4, py - 2.6, px + 1.4, py + 2.6), INK);
-    else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.4, py - 0.6, px + 1.4, py + 2.0), INK);
-    else stroke(h, Gx, px - 2.2, py, px + 2.2, py, INK);
+    const [px, py] = rot(H.cx + H.rx * 0.34, H.cy + H.ry * 0.22);
+    if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.2, py - 2.6, px + 1.2, py + 2.6), INK);
+    else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.2, py - 0.4, px + 1.2, py + 1.6), INK);
+    else stroke(h, Gx, px - 2.0, py, px + 2.0, py, INK);
   }
 
   /* the nose, small, on the front of the muzzle */
@@ -250,7 +279,20 @@ function paintFront(p, h, Gx) {
     h.paint(Gx, h.maskEllipse(cx + 2, ty, 18, tray), WHITE, INK);
     fillMask(h, Gx, maskBox(h, cx - 14, ty + 3, cx + 18, ty + tray - 1), GREY);
     fillMask(h, Gx, h.maskEllipse(cx + 1, ty - 1, 13, tray - 3.5), WHITE);
-    if (p.posture === 'stand') drawTail(h, Gx, p, cx + 11, ty, 10, tray);
+    if (p.posture === 'stand') {
+      /* The ORIGINAL's front tail: a small curl at the BODY'S RIGHT EDGE
+       * (idle_open rows 21..26, x 24..26) - not across her chest. Drawing it
+       * with maskChain from the body centre put a dark-outlined white blob on
+       * her sternum, which read in the side-by-side as a bowtie and was the
+       * most obviously wrong thing on her. A short curl off the right flank. */
+      const tx = cx + 18, ty0 = ty + 2;
+      const tpts = [];
+      for (let i = 0; i <= 5; i++) {
+        const t = i / 5;
+        tpts.push([tx + t * 3, ty0 - t * 11]);
+      }
+      h.paint(Gx, rig2.maskChain(tpts, [2.8, 2.7, 2.5, 2.2, 1.9, 1.6], h), WHITE, INK);
+    }
   } else {
     /* ASLEEP: a MOUND, not a standing cat. Low, wide, rounded, with the head
      * sunk into the shoulder and the ears folded - and the tail wrapped right
@@ -266,7 +308,7 @@ function paintFront(p, h, Gx) {
 
   const headY = lying ? ground - 13 : (sit ? 19 : 17) - lift + (p.headDY || 0);
   const hx = lying ? cx + 11 : cx - 1;
-  const HRX = lying ? 16 : 19, HRY = lying ? 12 : 13;
+  const HRX = lying ? 16 : 19, HRY = lying ? 12 : 11;
   drawHead(h, Gx, {
     front: true, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll,
     head: { cx: hx, cy: headY, rx: HRX, ry: HRY },
