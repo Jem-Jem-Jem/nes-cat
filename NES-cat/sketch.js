@@ -102,7 +102,24 @@
     NESCAT.Input.updateGaze();
 
     sceneGfx.noSmooth();
+
+    /* THE ROOM IS SCALED BY A TRANSFORM, not by editing its geometry.
+     *
+     * scene.js draws in logical coordinates with literals baked in - the window
+     * band is `x >= 14 && x <= 118`, the floorboards step `my += 14`, the
+     * skirting is `g.rect(0, 5, W, 1)`. Those are the art, and rewriting art
+     * is forbidden here. p5's push/scale/pop multiplies every coordinate a
+     * draw call receives, so the same literals render correctly at 2x with no
+     * edit inside scene.js at all.
+     *
+     * The cat is drawn AFTER the pop, so she is NOT scaled a second time: her
+     * frames are already 64x64 art in a 640x360 room. Scaling her too would
+     * make her 128 tall in a 360 room - 35% of screen height, which is exactly
+     * the failure the whole doubling exists to avoid. */
+    var sc = NESCAT.SCALE || 1;
+    if (sc !== 1) { sceneGfx.push(); sceneGfx.scale(sc); }
     NESCAT.Scene.draw(sceneGfx);
+    if (sc !== 1) { sceneGfx.pop(); }
     NESCAT.Shiro.draw(sceneGfx);
 
     background(CFG.THEME_BG);

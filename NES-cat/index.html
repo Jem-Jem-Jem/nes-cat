@@ -52,9 +52,19 @@
     <script src="js/room.js"></script>
     <script src="js/palette.js"></script>
     <script src="js/frames.js"></script>
+    <!-- The 64x64 sets. Loaded ALWAYS, not conditionally: the 32x32 set stays
+         exactly as it is and is still what the piece uses with no ?scale=. -->
+    <script src="js/frames64.js"></script>
+    <script src="js/objects64.js"></script>
     <script src="js/sprite.js"></script>
     <script src="js/scene.js"></script>
     <script src="js/shiro.js"></script>
+    <!-- THE SWITCH: ?scale=2 runs at 640x360 with the 64x64 art. Must load
+         AFTER scene.js and shiro.js (it doubles their constants) and BEFORE
+         sketch.js, whose setup() calls Scene.init() and Shiro.init() - the only
+         window in which swapping the frame table and the geometry takes
+         effect, since both bind them at init time rather than at load time. -->
+    <script src="js/scale.js"></script>
     <script src="js/input.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/ui.js"></script>
