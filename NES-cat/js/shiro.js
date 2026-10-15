@@ -1937,7 +1937,18 @@
 
     g.noStroke();
     g.fill(0, 0, 0, Math.round(60 * (1 - air * 0.55)));
-    g.ellipse(this.x + 16, NESCAT.Scene.FEET_Y + 2,
+    /* The shadow is centred on her, and she is centred on this.x. So the
+     * offset must be HALF HER SPRITE - which is a 32 at the default and a 64
+     * under ?scale=2. Written as a literal 16 it silently became wrong the
+     * moment she doubled: the scale transform in sketch.js wraps Scene.draw
+     * only, so a 32-space literal in HER draw is never multiplied, and at
+     * 640x360 her shadow sat 16px to one side of her feet.
+     *
+     * Read from the sprite rather than restated, so the two cannot drift
+     * apart again. 64/2 === 16, so this is byte-for-byte the old number at
+     * the default size. */
+    var halfW = NESCAT.config.SPRITE / 2;
+    g.ellipse(this.x + halfW, NESCAT.Scene.FEET_Y + 2,
               30 - air * 14, 7 - air * 3);
 
     /* particles behind the cat if they are "above" her */
