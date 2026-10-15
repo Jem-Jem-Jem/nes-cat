@@ -120,7 +120,25 @@
      *    furniture while looking like she is not. */
     if (NESCAT.Shiro) NESCAT.Shiro.BODY_HALF = ROOM.bodyHalf;
 
-    /* 5. speeds are world px per second, so they double or she crosses a
+    /* 5. THE PROPS' COLLISION BOXES. Scene.draw reads OBJECTS for position and
+     *    the scale transform already doubles the DRAWING. Collision is
+     *    arithmetic, not drawing, and no transform touches it — so without
+     *    this the furniture is drawn at 2x and collided with at 1x: visible
+     *    walls in the wrong place, and a cat who walks through where the plant
+     *    looks like it is. Caught by asking "does she stop in the same place at
+     *    both scales", which flagged an identical x; "does she clip" passed
+     *    happily and proved nothing. */
+    var O = NESCAT.Scene.OBJECTS;
+    if (O) {
+      for (var oname in O) {
+        if (!Object.prototype.hasOwnProperty.call(O, oname)) continue;
+        var ob = O[oname];
+        if (typeof ob.x === 'number') ob.x *= SCALE;
+        if (typeof ob.y === 'number') ob.y *= SCALE;
+      }
+    }
+
+    /* 6. speeds are world px per second, so they double or she crosses a
      *    twice-wide room in twice as long and feels broken without looking
      *    broken. Durations in seconds do NOT touch. */
     var B = CFG.BEHAVIOR;

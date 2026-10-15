@@ -1319,5 +1319,22 @@
     }
   };
 
+  /* EXPOSED, ADDITIVELY, FOR THE 640x360 SWITCH.
+   *
+   * OBJECTS holds each prop's x/y and anchor as literals, and both the drawing
+   * and solids() read them. The drawing is doubled for free by the scale
+   * transform in sketch.js; the COLLISION is not, because collision is
+   * arithmetic and no transform touches it.
+   *
+   * The first pass of the switch left this alone and shipped a room where the
+   * furniture was drawn at 2x and collided with at 1x - visible walls in the
+   * wrong place, and a cat who walks through where the plant looks like it is.
+   * The test that caught it did not ask "does she clip", it asked "does she stop
+   * in the same place at both scales", and got an identical x.
+   *
+   * One line, no literal changed, no art touched. It only makes the table
+   * reachable so scale.js can double it like everything else. */
+  Scene.OBJECTS = OBJECTS;
+
   NESCAT.Scene = Scene;
 })(typeof window !== 'undefined' ? window : globalThis);
