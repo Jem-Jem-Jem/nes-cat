@@ -521,6 +521,21 @@
 
       this._buildSprites();
 
+      /* THE YARN SITS AT HALF ITS OWN X AT ?scale=2. _yarnX was a module-scope
+       * literal (scene.js:224, `104`) that nothing doubled, while
+       * OBJECTS.yarn.x WAS doubled and YARN_MIN_X/YARN_MAX_X were doubled. So
+       * at 640x360 the ball started at x=104 of a 640-wide room - about a third
+       * of the way across, hard against the left wall - and, worse, OUTSIDE its
+       * own rest range of [184, 276]. The first drag clamped it into range in
+       * one jump, which is the "does not interact properly" a human reported:
+       * she reached for a yarn that was not where the room said it was, and
+       * the first touch of it teleported it.
+       *
+       * Taken from the table rather than restated, so it cannot fall out of
+       * step with the doubling again - and clamped into range so it can never
+       * start outside its own home. */
+      this._yarnX = U.clamp(OBJECTS.yarn.x, this.YARN_MIN_X, this.YARN_MAX_X);
+
       this._motes = [];
       for (var i = 0; i < 26; i++) {
         this._motes.push({

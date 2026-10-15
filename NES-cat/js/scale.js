@@ -111,6 +111,25 @@
       for (var k in ROOM) {
         if (!Object.prototype.hasOwnProperty.call(ROOM, k)) continue;
         if (k === 'scale' || k === 'bodyHalf') continue;
+        /* FLOOR_TOP IS THE FLOOR COLOUR BUG. It is the one constant in this
+         * table that is read ONLY by scene.js drawing - lines 660, 667, 693,
+         * 697, 701, 1078, 1082 and 1110, every one of them inside the draw,
+         * and therefore inside the scale transform. The transform already
+         * multiplies it, so doubling it here drew the wall/floor boundary at
+         * 232 in 320-space = 464 on a canvas 360 tall. The boundary went off
+         * the bottom of the screen, the floorboards loop (scene.js:1082,
+         * `for (var y = this.FLOOR_TOP; y < H; y += 9)`) started below the
+         * canvas and never ran, and a wall band was left covering where the
+         * floor should be - which is what a human reported as the floor being
+         * the wrong colour.
+         *
+         * Every other constant here is read by BEHAVIOUR - FEET_Y by shiro.js,
+         * the walk range and the bowl and yarn and tree positions by her
+         * approach logic - so they must double. This one must not, and the
+         * rule is the same as the OBJECTS table two blocks down: a number the
+         * transform sees must not be pre-scaled, and a number the transform
+         * never sees must be. */
+        if (k === 'FLOOR_TOP') continue;
         if (typeof ROOM[k] === 'number' && typeof S[k] === 'number') S[k] = ROOM[k];
       }
     }

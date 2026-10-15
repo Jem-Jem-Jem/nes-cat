@@ -31,6 +31,22 @@ const G = rig2.geomFor(SIZE);
 const PAW_Y = G.PAW_Y;
 
 const WHITE = 'W', INK = 'K', GREY = 'G', NOSE = 'N', PINK = 'P';
+/* TWO GREYS THE ORIGINAL USES AND THE REDRAW DID NOT. Measured off frames.js:
+ * H #ced4da is her MUZZLE in profile - distinctly paler than the body - and
+ * M #495057 is the mouth line and the paw detail. Drawing the muzzle white is
+ * most of why the profile read as a beak. */
+const MUEZZLE = 'H';
+const DARK = 'M';
+
+/* edge-only outline, for shapes drawn as fills (the ears) */
+function edgeMask(h, Gx, m, ch) {
+  for (let y = 0; y < h.H; y++) for (let x = 0; x < h.W; x++) {
+    if (!m[y][x]) continue;
+    const e = !(y > 0 && m[y - 1][x]) || !(y < h.H - 1 && m[y + 1][x]) ||
+      !(x > 0 && m[y][x - 1]) || !(x < h.W - 1 && m[y][x + 1]);
+    if (e) Gx[y][x] = ch;
+  }
+}
 
 /* ---------- helpers ---------- */
 function fillMask(h, Gx, m, ch) {
@@ -87,79 +103,94 @@ function drawLeg(h, Gx, hipX, hipY, pawX, pawY, b, ch, bend) {
 function drawHead(h, Gx, o) {
   const front = !!o.front;
   const H = o.head, M = o.muzzle;
-  const pitch = o.pitch || 0;            /* degrees, + = nose down */
-  const roll = o.roll || 0;              /* degrees, + = tilt right */
+  const pitch = o.pitch || 0, roll = o.roll || 0;
   const rad = d => d * Math.PI / 180;
-
-  /* ears first, behind the skull. ROUNDED and SHORT - a triangle with a rounded
-   * tip is a blunted spike, which is what the 32x32 original had. */
-  const earR = front ? 5.4 : 5.6;
-  const specs = front
-    ? [[H.cx - H.rx * 0.74, H.cy - H.ry * 0.86, earR * 0.86, earR], [H.cx + H.rx * 0.74, H.cy - H.ry * 0.86, earR * 0.86, earR]]
-    : [[H.cx + (o.earDx == null ? -4.8 : o.earDx), H.cy + (o.earDy == null ? -7.5 : o.earDy), earR, earR * 0.95]];
-  for (const [ex, ey, erx, ery] of specs) h.paint(Gx, h.maskEllipse(ex, ey, erx, ery), WHITE, INK);
-  for (const [ex, ey, erx, ery] of specs) fillMask(h, Gx, h.maskEllipse(ex, ey + 0.8, erx * 0.52, ery * 0.55), PINK);
-
-  /* rotate the face features about the head centre by pitch and roll */
   const ca = Math.cos(rad(pitch)), sa = Math.sin(rad(pitch));
   const cb = Math.cos(rad(roll)), sb = Math.sin(rad(roll));
   const rot = (x, y) => {
     let dx = x - H.cx, dy = y - H.cy;
-    let rx = dx * cb - dy * sb, ry = dx * sb + dy * cb;
-    const nx = rx * ca - ry * sa, ny = rx * sa + ry * ca;
-    return [H.cx + nx, H.cy + ny];
+    const rx = dx * cb - dy * sb, ry = dx * sb + dy * cb;
+    return [H.cx + (rx * ca - ry * sa), H.cy + (rx * sa + ry * ca)];
   };
 
-  /* skull */
+  /* EARS: the ORIGINAL's ears, not better ones. Measured off idle_open at
+   * 32x32 - tips at rows 2..3, sloping outward and down to a base that merges
+   * with the skull by row 8, with a pink inner. They are SMALL TRIANGLES at the
+   * top corners, about a quarter of the head's width. Brief 51 rounded them and
+   * a human rejected the result, so they are triangles again: not improved,
+   * reproduced. */
+  const eH = H.ry * (front ? 0.80 : 0.72);
+  const eW = H.rx * (front ? 0.30 : 0.22);
+  const ex = H.rx * (front ? 0.62 : 0.44);
+  const specs = front
+    ? [[H.cx - ex, H.cy - H.ry * 0.62, eW, eH], [H.cx + ex, H.cy - H.ry * 0.62, eW, eH]]
+    : [[H.cx - ex, H.cy - H.ry * 0.55, eW * 0.9, eH]];
+  for (const [ax, ay, aw, ah] of specs) {
+    /* base INSIDE the skull so the ear merges with it. The first attempt put
+     * the base ON the skull's top edge, which left them floating above her head
+     * as detached pink flecks. */
+    const tipx = ax + (ax < H.cx ? -aw * 0.5 : aw * 0.5);
+    const m = h.maskTri(ax - aw, ay, ax + aw, ay, tipx, ay - ah);
+    h.paint(Gx, m, WHITE, INK);
+    fillMask(h, Gx, h.maskTri(ax - aw * 0.5, ay, ax + aw * 0.5, ay, tipx, ay - ah * 0.68), PINK);
+  }
+
+  /* skull: the measured proportion. idle_open's head is 20 wide of a 21 wide
+   * figure and 14 tall, so rx is NEARLY HALF the figure width. The earlier
+   * pass used rx 12.5 at 64 - 37% too small - which is most of why the redraw
+   * did not read as her. */
   h.paint(Gx, h.maskEllipse(H.cx, H.cy, H.rx, H.ry), WHITE, INK);
 
-  /* cheeks - the identity detail, inside the skull so it takes no outline */
-  const cheekY = H.cy + H.ry * 0.42;
+  /* NO brow band. Row 8 of the original reads KKKKWWWWWWWWWWWWKKKK - black at
+   * the EDGES only, which is the skull's own outline and not a bar. Painting a
+   * solid one across the middle of her face put a black stripe on her like a
+   * hat brim. The outline above already draws it correctly. */
+
+  /* cheeks: the original puts them LOW and near the middle - row 15, either
+   * side of the nose - not on the outer edge of the face as the redraw did. */
+  const cheekY = H.cy + H.ry * 0.62;
   if (front) {
-    fillMask(h, Gx, h.maskEllipse(H.cx - H.rx * 0.66, cheekY, 3.1, 2.0), PINK);
-    fillMask(h, Gx, h.maskEllipse(H.cx + H.rx * 0.66, cheekY, 3.1, 2.0), PINK);
+    fillMask(h, Gx, h.maskEllipse(H.cx - H.rx * 0.30, cheekY, 1.9, 1.4), PINK);
+    fillMask(h, Gx, h.maskEllipse(H.cx + H.rx * 0.30, cheekY, 1.9, 1.4), PINK);
   } else {
-    fillMask(h, Gx, h.maskEllipse(H.cx - H.rx * 0.34, H.cy + H.ry * 0.34, 2.2, 1.6), PINK);
+    fillMask(h, Gx, h.maskEllipse(H.cx - H.rx * 0.10, H.cy + H.ry * 0.52, 1.8, 1.3), PINK);
   }
 
-  /* THE MUZZLE, painted over the skull so its own outline is the plane break */
+  /* THE MUZZLE. Painted over the skull so its own outline is the brow/muzzle
+   * plane break. In PROFILE it is the light grey #ced4da, not white - the
+   * original's muzzle is a distinctly paler grey than her body, and drawing it
+   * white is what made the profile read as a beak. */
   const [mx, my] = rot(M.cx, M.cy);
   const muz = h.maskEllipse(mx, my, M.rx, M.ry);
-  h.paint(Gx, muz, WHITE, INK);
-  fillMask(h, Gx, maskBox(h, mx - M.rx, my - M.ry * 0.76, mx + M.rx, my - M.ry * 0.40), GREY);
-  fillMask(h, Gx, maskBox(h, mx - M.rx * 0.70, my + M.ry * 0.46, mx + M.rx * 0.70, my + M.ry * 0.95), GREY);
-  fillMask(h, Gx, h.maskEllipse(mx, my + M.ry * 0.06, M.rx * 0.88, M.ry * 0.80), WHITE);
+  h.paint(Gx, muz, front ? WHITE : MUEZZLE, INK);
+  fillMask(h, Gx, maskBox(h, mx - M.rx, my - M.ry * 0.72, mx + M.rx, my - M.ry * 0.34), GREY);
+  fillMask(h, Gx, maskBox(h, mx - M.rx * 0.66, my + M.ry * 0.44, mx + M.rx * 0.66, my + M.ry * 0.92), DARK);
+  fillMask(h, Gx, h.maskEllipse(mx, my + M.ry * 0.04, M.rx * 0.88, M.ry * 0.78), front ? WHITE : MUEZZLE);
 
-  /* eyes, on the skull ABOVE the muzzle so the plane break runs between them */
+  /* eyes: LOW and WIDE apart, which is the original's whole expression.
+   * Two columns three rows tall. */
   const open = o.eyeOpen == null ? 1 : o.eyeOpen;
   if (front) {
-    const ex = H.rx * 0.46;
+    const dx = H.rx * 0.40;
     for (const s of [-1, 1]) {
-      const [px, py] = rot(H.cx + s * ex, H.cy - H.ry * 0.18);
-      if (open > 0.55) {
-        fillMask(h, Gx, h.maskEllipse(px, py, 2.5, 2.9), INK);
-        h.px(Gx, Math.round(px) + (s > 0 ? -1 : 1), Math.round(py) - 1, WHITE);
-      } else if (open > 0.2) {
-        fillMask(h, Gx, h.maskEllipse(px, py, 2.5, 1.5), INK);
-      } else {
-        stroke(h, Gx, px - 2.2, py, px + 2.2, py, INK);
-      }
+      const [px, py] = rot(H.cx + s * dx, H.cy + H.ry * 0.14);
+      if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.6, py - 3.0, px + 1.6, py + 3.0), INK);
+      else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.6, py - 0.8, px + 1.6, py + 2.4), INK);
+      else stroke(h, Gx, px - 2.4, py, px + 2.4, py, INK);
     }
   } else {
-    const [px, py] = rot(H.cx + H.rx * 0.34, H.cy - H.ry * 0.16);
-    if (open > 0.55) { fillMask(h, Gx, h.maskEllipse(px, py, 2.3, 2.7), INK); h.px(Gx, Math.round(px) + 1, Math.round(py) - 1, WHITE); }
-    else if (open > 0.2) { fillMask(h, Gx, h.maskEllipse(px, py, 2.3, 1.4), INK); }
-    else { stroke(h, Gx, px - 2.0, py, px + 2.0, py, INK); }
+    const [px, py] = rot(H.cx + H.rx * 0.30, H.cy + H.ry * 0.16);
+    if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.4, py - 2.6, px + 1.4, py + 2.6), INK);
+    else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.4, py - 0.6, px + 1.4, py + 2.0), INK);
+    else stroke(h, Gx, px - 2.2, py, px + 2.2, py, INK);
   }
 
-  /* nose at the FRONT of the muzzle */
-  const [nx, ny] = rot(front ? M.cx : M.cx + M.rx * 0.40, M.cy - M.ry * (front ? 0.34 : 0.40));
-  const nw = front ? 2.6 : 1.8, nh = front ? 1.4 : 1.1;
-  fillMask(h, Gx, h.maskTri(nx - nw, ny - nh, nx + nw, ny - nh, nx, ny + nh + 0.4), NOSE);
-  h.px(Gx, Math.round(nx), Math.round(ny) - Math.round(nh) - 1, INK);
-  const my2 = ny + (front ? 2.2 : 1.8);
-  stroke(h, Gx, nx - 1, my2, nx, my2 + 1, INK);
-  stroke(h, Gx, nx, my2 + 1, nx + 1, my2, INK);
+  /* the nose, small, on the front of the muzzle */
+  const [nx, ny] = rot(front ? M.cx : M.cx + M.rx * 0.34, M.cy - M.ry * 0.30);
+  const nw = front ? 2.0 : 1.5, nh = front ? 1.2 : 1.0;
+  fillMask(h, Gx, h.maskTri(nx - nw, ny - nh, nx + nw, ny - nh, nx, ny + nh + 0.3), NOSE);
+  /* the mouth: a dark line under it, which is all the original has */
+  stroke(h, Gx, nx - (front ? 1.6 : 1.2), ny + nh + 0.9, nx + (front ? 1.6 : 1.2), ny + nh + 0.9, DARK);
 }
 
 /* ---------- the tail ----------
@@ -208,12 +239,17 @@ function paintFront(p, h, Gx) {
       }
       for (const s of [-1, 1]) { drawLeg(h, Gx, cx + s * 6.5, 34 - lift, cx + s * 7.5, ground - 1, G.leg.front, WHITE, -1); toes(h, Gx, cx + s * 7.5, ground + 1, 2); }
     }
-    /* torso: a ribcage, not a cloud */
-    const ty = (sit ? 37 : 37) - lift + (p.bodyY || 0);
-    const tray = sit ? 13.5 : 11.5;
-    h.paint(Gx, h.maskEllipse(cx, ty, 11.5, tray), WHITE, INK);
-    fillMask(h, Gx, maskBox(h, cx - 9, ty + 4, cx + 9, ty + tray), GREY);
-    fillMask(h, Gx, h.maskEllipse(cx, ty + 3, 7.5, 6.5), WHITE);
+    /* torso: the original's loaf. idle_open's body is 19 wide of a 21 wide figure
+     * and 12 tall, sitting at x 8..26, rows 17..28 - almost exactly as wide as
+     * the head, with no neck and no shoulders. Scaled x2 that is cx 34, cy 45,
+     * rx 18, ry 11. The earlier redraw used rx 11.5 and sat her on visible
+     * legs; both were wrong, and both came from brief 51's "she need not be a
+     * cloud", which is not what the original ever was. */
+    const ty = (sit ? 43 : 43) - lift + (p.bodyY || 0);
+    const tray = sit ? 14 : 13;
+    h.paint(Gx, h.maskEllipse(cx + 2, ty, 18, tray), WHITE, INK);
+    fillMask(h, Gx, maskBox(h, cx - 14, ty + 3, cx + 18, ty + tray - 1), GREY);
+    fillMask(h, Gx, h.maskEllipse(cx + 1, ty - 1, 13, tray - 3.5), WHITE);
     if (p.posture === 'stand') drawTail(h, Gx, p, cx + 11, ty, 10, tray);
   } else {
     /* ASLEEP: a MOUND, not a standing cat. Low, wide, rounded, with the head
@@ -228,12 +264,13 @@ function paintFront(p, h, Gx) {
     drawTail(h, Gx, { tailWrap: true }, cx, by, 18, 9);
   }
 
-  const headY = lying ? ground - 11 : (sit ? 17 : 19) - lift + (p.headDY || 0);
-  const hx = lying ? cx + 9 : cx;
+  const headY = lying ? ground - 13 : (sit ? 19 : 17) - lift + (p.headDY || 0);
+  const hx = lying ? cx + 11 : cx - 1;
+  const HRX = lying ? 16 : 19, HRY = lying ? 12 : 13;
   drawHead(h, Gx, {
     front: true, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll,
-    head: { cx: hx, cy: headY, rx: lying ? 11 : 12.5, ry: lying ? 10 : 11 },
-    muzzle: { cx: hx, cy: headY + (lying ? 6 : 6.5), rx: lying ? 7 : 8, ry: lying ? 5.2 : 6 }
+    head: { cx: hx, cy: headY, rx: HRX, ry: HRY },
+    muzzle: { cx: hx, cy: headY + HRY * 0.80, rx: lying ? 11 : 13, ry: lying ? 3 : 2.6 }
   });
 }
 function edgeMaskLike(h, Gx, cx, cy, rx, ry) {
@@ -296,30 +333,33 @@ function paintSide(p, h, Gx) {
     fillMask(Gx, Gx ? maskBox(h, 17, 36 - lift, 41, 42 - lift) : null, GREY);
     fillMask(h, Gx, h.maskEllipse(27, 32 - lift, 10.5, 5.2), WHITE);
   } else {
-    /* THE BODY IS THE WHOLE PROPORTION. The first pass hung the torso at
-     * cy=34 with ry=8.6 and left the 22.6px legs showing from hip to floor, so
-     * she stood four-legged and leggy and read as a greyhound. A cat is mostly
-     * BODY with legs under it: the torso is deepened and dropped so the hips -
-     * which are still hung from the bone length, and therefore do not move -
-     * sit INSIDE it, and only the paw end of each leg shows.
+    /* THE BODY IS THE WHOLE PROPORTION, and it is the ORIGINAL's, not an
+     * improved one. side_walk_0's body is x 4..26 rows 16..23 - LONG and LOW,
+     * 22 wide by 7 tall at 64 - with legs only rows 23..27, five of twenty-four.
+     * She is mostly body in profile too.
      *
-     * The bones are unchanged. Only where the mass sits changed. */
-    const by = 38 - lift + (p.bodyY || 0);
-    const rx = p.long ? 17.5 : 15.0;
-    const ry = p.long ? 9.4 : 10.2;
-    h.paint(Gx, h.maskEllipse(29, by, rx, ry), WHITE, INK);
-    fillMask(h, Gx, maskBox(h, 29 - rx + 2, by + 2.5, 29 + rx - 2, by + ry - 1), GREY);
-    fillMask(h, Gx, h.maskEllipse(27, by - 2, rx - 4, ry - 3.5), WHITE);
+     * The previous pass deepened her and let the 22.6px legs show hip to floor,
+     * which read as a greyhound. Brief 51 said "she need not be a cloud" and
+     * that was the wrong instruction: she WAS a cloud, she looked right as one,
+     * and a human rejected the version that was not. */
+    const by = 39 - lift + (p.bodyY || 0);
+    const rx = p.long ? 24 : 22;
+    const ry = p.long ? 8.0 : 7.0;
+    h.paint(Gx, h.maskEllipse(30, by, rx, ry), WHITE, INK);
+    fillMask(h, Gx, maskBox(h, 30 - rx + 2, by + 1.5, 30 + rx - 2, by + ry - 1), GREY);
+    fillMask(h, Gx, h.maskEllipse(28, by - 1, rx - 4, ry - 2.4), WHITE);
   }
 
   /* neck, then head. Pitched down for eat and drink so she is looking at the
    * bowl rather than at the viewer. */
-  const headBase = lyingS ? { cx: 45, cy: ground - 10 } : { cx: 45, cy: 16 - lift + (p.headDY || 0) };
-  if (!air || true) h.paint(Gx, h.maskEllipse(39, headBase.cy + 9, 6.0, 7.0), WHITE, INK);
+  const headBase = lyingS ? { cx: 45, cy: ground - 12 } : { cx: 45, cy: 22 - lift + (p.headDY || 0) };
+  h.paint(Gx, h.maskEllipse(38, headBase.cy + 8, 6.0, 6.5), WHITE, INK);
   drawHead(h, Gx, {
     front: false, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll,
-    head: { cx: headBase.cx, cy: headBase.cy, rx: 9.4, ry: 9.6 },
-    muzzle: { cx: headBase.cx + 5.8, cy: headBase.cy + 4.4 - (p.muzzleUp || 0), rx: 5.6, ry: 5.2 },
+    /* measured off side_walk_0: the profile skull is x 17..28 rows 4..18, so at
+     * 64 it is cx 45, cy 22, rx 11, ry 14 - not the 9.4x9.6 the redraw used */
+    head: { cx: headBase.cx, cy: headBase.cy, rx: 11, ry: 14 },
+    muzzle: { cx: headBase.cx + 1, cy: headBase.cy + 10.5 - (p.muzzleUp || 0), rx: 7, ry: 2.6 },
     earDx: -4.8, earDy: -7.5
   });
 }
