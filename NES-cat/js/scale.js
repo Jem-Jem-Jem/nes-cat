@@ -135,6 +135,18 @@
         var ob = O[oname];
         if (typeof ob.x === 'number') ob.x *= SCALE;
         if (typeof ob.y === 'number') ob.y *= SCALE;
+        /* collideW/collideX TOO. The plant's pot is 22px of solid rim, and
+         * doubling only its position left the box 22 wide while the pot drew
+         * 80 - so the gap between where she stops and where the pot visibly
+         * ends went 9px at 320x180 to 29px at 640x360.
+         *
+         * ONLY these two. ax, ay and shadowW are read by Scene.draw INSIDE the
+         * scale transform (lines 1219-20 and 1247), so the transform already
+         * multiplies them and doubling here would draw the props at 4x.
+         * The rule either way: a number the transform sees must not be
+         * pre-scaled, and a number the transform never sees must be. */
+        if (typeof ob.collideW === 'number') ob.collideW *= SCALE;
+        if (typeof ob.collideX === 'number') ob.collideX *= SCALE;
       }
     }
 
