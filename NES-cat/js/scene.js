@@ -1215,9 +1215,28 @@
       var sprite = this.sprites[d.sprite];
       var frame = this.objectFrame(name);
       if (!frame || !sprite.frames[frame]) return;
+      /* THE DIVISION BY THE SWITCH SCALE, AND WHY IT IS HERE.
+       *
+       * OBJECTS.x / OBJECTS.y are in the ROOM's coordinates. Everything that
+       * reads them wants that: the hit test, the collider, the offset recorded
+       * when she grabs the yarn. The painting is the one exception, because
+       * sketch.js wraps this whole draw in scale(2) and the renderer
+       * multiplies whatever it is handed - so the room's coordinates have to be
+       * brought back to 320-space before they get multiplied a second time.
+       *
+       * d.ax / d.ay are 320-space already and must NOT be divided. Dividing the
+       * position and not the anchor is the whole trick: (x/scale) - ax.
+       *
+       * Commit 26cc6cf did not have this, so every floor object was drawn at
+       * twice its doubled position and vanished off the edge of the canvas:
+       * the plant 484px past a 640px edge, the bowls below a 360px floor.
+       * The wall survived because it is drawn from literals in the transform,
+       * not from this table.
+       */
+      var inv = 1 / (NESCAT.SCALE || 1);
       NESCAT.Sprite.draw(g, sprite, frame,
-        this.objectX(name) - d.ax + (d.dx ? d.dx(this) : 0),
-        d.y - d.ay,
+        (this.objectX(name) + (d.dx ? d.dx(this) : 0)) * inv - d.ax,
+        d.y * inv - d.ay,
         { ambient: L.ambient, ambientAmt: L.ambientAmt * (k == null ? 0.6 : k) });
     },
 
@@ -1236,8 +1255,14 @@
       var b = this.box(name);
       var d = OBJECTS[name];
       if (!b || !d) return;
-      var cx = b.x + d.ax;
-      var footY = b.y + b.h;
+      /* same division as drawObject: the centre and the floor line come from the
+       * table and are in room coordinates, while shadowW and the frame width
+       * are 320-space and go to the transform as they are. */
+      var inv = 1 / (NESCAT.SCALE || 1);
+      var cx = this.objectX(name) * inv;
+      /* b.y + b.h is the BOTTOM of the frame, which is the floor line - not
+       * d.y, which is the anchor. Keep the frame height in it. */
+      var footY = (d.y - d.ay + b.h) * inv;
       /* The shadow is its own size, not the frame's. The yarn's frame is 20
        * wide because it has a strand trailing off one side, and a shadow
        * derived from that came out nearly twice the ball — a dark bar on the
