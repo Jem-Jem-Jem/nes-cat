@@ -237,13 +237,72 @@ function drawTail(h, Gx, p, cx, by, rx, ry) {
     r.push(3.2 - 2.0 * t);
   }
   if (p.tailWrap) {
+    /* The wrap STAYS the wrap - a front-facing cat with her tail round her is
+     * asleep, and that shape is the reason this branch reads as deliberate.
+     * What it was not getting was the pose: the front path handed this function
+     * a literal and kept both knobs to itself, so a lying frame that asked for a
+     * curl got the resting arch. No shipped lying pose sets either yet, so this
+     * moves nothing that exists today - it stops the front path throwing them
+     * away a second time. A curl arches the wrap tighter; a lift takes it up
+     * off her paws. */
+    const arc = 5 + curl * 0.05, rise = -(lift / 10);
     for (let i = 0; i <= N; i++) {
       const t = i / N;
-      pts[i] = [cx - rx * 0.9 + t * (rx * 2.6), by + ry * 0.92 - Math.sin(t * Math.PI) * 5 - t * 2];
+      pts[i] = [cx - rx * 0.9 + t * (rx * 2.6), by + ry * 0.92 - Math.sin(t * Math.PI) * arc - t * 2 - rise];
       r[i] = 3.0 - 2.0 * t;
     }
   }
   h.paint(Gx, rig2.maskChain(pts, r, h), WHITE, INK);
+}
+
+/* ---------- THE FRONT TAIL, which is the one that was thrown away ----------
+ *
+ * The front view's tail is the ORIGINAL's: a short curl at the body's RIGHT
+ * edge - 32x32 idle_open rows 21..26, x 23..25 - and never across her chest.
+ * The first redraw drew it from the body centre and put a dark-outlined white
+ * blob on her sternum, which a human rejected. So the shape stays where it is.
+ *
+ * What it could not be was a RESPONSE. tailLift and tailCurl went to the side
+ * view and were dropped here, which is why twelve frames whose entire content is
+ * a moving tail came out of the build byte-identical to the frame underneath
+ * them.
+ *
+ * Both names mean what rig2's own tailChain means by them, and in a front view
+ * both are the same fact seen twice - the tail comes UP and OUT:
+ *   tailLift (negative)  raises the root, 0.30px a degree, off her hip
+ *   tailLift             also lays the tail toward level, 0.75 of an angle, so
+ *                        a raised tail is not a pole pushed sideways
+ *   tailCurl             a total turn taken along the length, weighted to the
+ *                        tip (f^1.6) so the end swings and the root does not,
+ *                        at 0.6 of the angle - a tail coming toward the viewer
+ *                        shows more of itself, it does not hinge at the hip -
+ *                        normalised so the chain turns by exactly `curl`
+ *
+ * AT curl 0 AND lift 0 this is five steps of (0.6, -2.2) from (bx, by): the
+ * measured resting curl, to the pixel. Nothing without a tail beat moves. */
+const FRONT_TAIL_SEG = Math.hypot(0.6, 2.2);       /* 2.2804, the measured step */
+const FRONT_TAIL_REST = Math.atan2(0.6, 2.2);     /* 15.26deg off vertical, out */
+function drawFrontTail(h, Gx, p, bx, by) {
+  const DEG = Math.PI / 180;
+  const curlDeg = p.tailCurl || 0, liftDeg = p.tailLift || 0;
+  const curl = curlDeg * DEG, lift = liftDeg * DEG;
+  const N = 5;
+  /* the turn is weighted to the tip - and normalised so the chain turns by
+   * exactly `curl`, which is what the pose table's 40/55/70 mean. */
+  const w = [];
+  for (let i = 0; i < N; i++) w.push(Math.pow((i + 1) / N, 1.6));
+  const wsum = w.reduce((a, b) => a + b, 0);
+
+  /* the root rides UP the flank on a lift (tailLift is negative to raise) */
+  const tpts = [[bx, by + liftDeg * 0.3]];
+  let turn = 0;
+  for (let i = 0; i < N; i++) {
+    turn += curl * (w[i] / wsum);
+    const a = FRONT_TAIL_REST - lift * 0.75 + turn * 0.6;
+    tpts.push([tpts[i][0] + Math.sin(a) * FRONT_TAIL_SEG,
+      tpts[i][1] - Math.cos(a) * FRONT_TAIL_SEG]);
+  }
+  h.paint(Gx, rig2.maskChain(tpts, [2.8, 2.7, 2.5, 2.2, 1.9, 1.6], h), WHITE, INK);
 }
 
 /* ---------- FRONT ---------- */
@@ -279,20 +338,21 @@ function paintFront(p, h, Gx) {
     h.paint(Gx, h.maskEllipse(cx + 2, ty, 18, tray), WHITE, INK);
     fillMask(h, Gx, maskBox(h, cx - 14, ty + 3, cx + 18, ty + tray - 1), GREY);
     fillMask(h, Gx, h.maskEllipse(cx + 1, ty - 1, 13, tray - 3.5), WHITE);
-    if (p.posture === 'stand') {
-      /* The ORIGINAL's front tail: a small curl at the BODY'S RIGHT EDGE
-       * (idle_open rows 21..26, x 24..26) - not across her chest. Drawing it
-       * with maskChain from the body centre put a dark-outlined white blob on
-       * her sternum, which read in the side-by-side as a bowtie and was the
-       * most obviously wrong thing on her. A short curl off the right flank. */
-      const tx = cx + 18, ty0 = ty + 2;
-      const tpts = [];
-      for (let i = 0; i <= 5; i++) {
-        const t = i / 5;
-        tpts.push([tx + t * 3, ty0 - t * 11]);
-      }
-      h.paint(Gx, rig2.maskChain(tpts, [2.8, 2.7, 2.5, 2.2, 1.9, 1.6], h), WHITE, INK);
-    }
+    /* The ORIGINAL's front tail: a small curl at the BODY'S RIGHT EDGE
+     * (idle_open rows 21..26, x 24..26) - not across her chest. Drawing it
+     * with maskChain from the body centre put a dark-outlined white blob on
+     * her sternum, which read in the side-by-side as a bowtie and was the
+     * most obviously wrong thing on her. A short curl off the right flank.
+     *
+     * It is the SAME curl whether she is standing or sitting, because it is the
+     * same curl in the 32x32 original (sit_open rows 21..26, x 23..25 - byte
+     * for byte the same tail idle_open has). The sit path drew none at all, so
+     * six frames named for a moving tail came out as six copies of sit_open.
+     *
+     * And it takes the pose. This is the line the brief is about: the tail is
+     * drawn from the pose now, so a flick and a tailUp are different drawings
+     * and not the same one with a different name. */
+    drawFrontTail(h, Gx, p, cx + 18, ty + 2);
   } else {
     /* ASLEEP: a MOUND, not a standing cat. Low, wide, rounded, with the head
      * sunk into the shoulder and the ears folded - and the tail wrapped right
@@ -303,7 +363,10 @@ function paintFront(p, h, Gx) {
     fillMask(h, Gx, h.maskEllipse(cx - 2, by - 2, 15, 5.6), WHITE);
     /* tucked paws showing at the front */
     for (const s of [-1, 1]) { fillMask(h, Gx, h.maskEllipse(cx + s * 9, ground - 2, 5, 3), WHITE); edgeMaskLike(h, Gx, cx + s * 9, ground - 2, 5, 3); }
-    drawTail(h, Gx, { tailWrap: true }, cx, by, 18, 9);
+    /* The wrap, drawn FROM THE POSE rather than from a literal built on the
+     * spot. `tailWrap` stays true - the shape is right - but the pose now
+     * arrives with it instead of being dropped on the floor. */
+    drawTail(h, Gx, Object.assign({ tailWrap: true }, p), cx, by, 18, 9);
   }
 
   const headY = lying ? ground - 13 : (sit ? 19 : 17) - lift + (p.headDY || 0);
