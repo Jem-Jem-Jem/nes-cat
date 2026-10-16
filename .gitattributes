@@ -1,0 +1,10 @@
+# The generated frame files are build output, written LF by
+# tools/build-sprites.js. Settle their line endings in the repo rather than
+# leaving it to core.autocrlf, which is a per-clone setting: on a clone with
+# core.autocrlf=true and no rule here, git checks the files out as CRLF, the
+# generator rewrites them as LF, and git then reports two byte-identical files
+# as modified. `text eol=lf` forces LF on checkout whatever core.autocrlf is
+# set to, and the stored blobs are already LF, so no blob is rewritten.
+NES-cat/js/frames.js text eol=lf
+NES-cat/js/frames64.js text eol=lf
+NES-cat/js/objects64.js text eol=lf
