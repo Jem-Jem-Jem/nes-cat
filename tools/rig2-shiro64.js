@@ -420,8 +420,14 @@ function paintSide(p, h, Gx) {
         drawLeg(h, Gx, lx, hipFor(b, ground), lx + (t.dx || 0), t.y, b, WHITE, t.bend == null ? 1 : t.bend);
         toes(h, Gx, lx + (t.dx || 0), t.y + 2, 2);
       } else {
-        drawLeg(h, Gx, lx, hipFor(b, ground), lx, ground, b, k.indexOf('far') === 0 ? GREY : WHITE, -1);
-        if (!k.indexOf('far')) toes(h, Gx, lx, ground + 2, 2);
+        /* A STRIDE, not a stance. The hip stays where the body put it and the
+         * paw travels fore and aft under it, which is the whole of a walk: the
+         * paw sweeps back along the floor and comes forward through the air.
+         * A pose with no stride draws exactly what it always drew. */
+        const s = (p.stride && p.stride[k]) || { dx: 0, lift: 0, bend: -1 };
+        drawLeg(h, Gx, lx, hipFor(b, ground), lx + s.dx, ground - s.lift, b,
+          k.indexOf('far') === 0 ? GREY : WHITE, s.bend == null ? -1 : s.bend);
+        if (!k.indexOf('far')) toes(h, Gx, lx + s.dx, ground - s.lift + 2, 2);
       }
     }
   }
@@ -535,10 +541,42 @@ function table() {
   put('alert_1', P({ posture: 'stand', eyeOpen: 1, bodyY: -2, pitch: -3 }));
 
   /* ---- SIDE ---- */
-  /* walk: the gait is the leg fold and the body bob, one beat per leg pair */
-  const walk = [
-    { bodyY: 0 }, { bodyY: -1.2 }, { bodyY: 0 }, { bodyY: -1.2 }, { bodyY: 0 }, { bodyY: -1.2 }
-  ];
+  /* THE GAIT, and it is the walk's whole content.
+   *
+   * The six beats are ONE gait sampled six times, not six drawings. A cat
+   * walks on a lateral-sequence gait: hind then front, then hind then front on
+   * the other side, one and a half beats apart, so the cycle only comes round
+   * once in six. Each leg is planted for four beats and in the air for two,
+   * and it sweeps back while it is down and forward while it is up - which is
+   * what a paw does, and what stops it sliding.
+   *
+   * u is where that leg is in the cycle: below 5 it is on the floor and the
+   * paw runs from +STRIDE at u=1 to -STRIDE at u=5; from 5 it is swinging,
+   * back through neutral and forward again, lifted on a half-sine.
+   *
+   * Shiro's turn is 0.2s a beat, so these six are what the viewer sees while
+   * she crosses the room. Before this the walk carried a body bob and nothing
+   * else, and the six beats came out as two pictures. */
+  const GAIT_PHASE = { nearBack: 0, nearFront: 1.5, farBack: 3, farFront: 4.5 };
+  const STRIDE = 4, SWING_FROM = 5, LIFT = 5;
+  function gaitLeg(leg, beat) {
+    let u = (beat - GAIT_PHASE[leg]) % 6;
+    if (u < 0) u += 6;
+    /* the swing runs from u=5 round to u=7, so it straddles the wrap */
+    if (u >= SWING_FROM || u < 1) {
+      const t = u < 1 ? u + 6 : u;
+      return { dx: STRIDE * (t - 6), lift: LIFT * Math.sin(Math.PI * (t - SWING_FROM) / 2), bend: 1 };
+    }
+    return { dx: STRIDE * (3 - u) / 2, lift: 0, bend: -1 };
+  }
+  const walk = [0, 1, 2, 3, 4, 5].map(beat => ({
+    /* she bobs twice a cycle, with the legs rather than against them */
+    bodyY: beat % 3 === 1 ? -1.2 : 0,
+    stride: {
+      nearBack: gaitLeg('nearBack', beat), nearFront: gaitLeg('nearFront', beat),
+      farBack: gaitLeg('farBack', beat), farFront: gaitLeg('farFront', beat)
+    }
+  }));
   BEATS.walk.forEach((b, i) => put('side_walk_' + b, P(Object.assign({ posture: 'walk' }, walk[i]))));
 
   put('side_stretch_0', P({ posture: 'stand', bodyY: 0, pitch: -4, eyeOpen: 1 }));
