@@ -199,16 +199,36 @@ function drawHead(h, Gx, o) {
    * 8 columns apart. The redraw's were wide rectangles twice the size, set far
    * apart at mid-face. */
   const open = o.eyeOpen == null ? 1 : o.eyeOpen;
+  /* THE GAZE. She moves her eyes; she does not turn her head.
+   *
+   * idle_look_left and idle_look_right were declared as two IDENTICAL pose
+   * objects - same posture, same eyeOpen, same headDY - so the renderer
+   * faithfully drew the same cat twice and three shipped names came out as one
+   * picture. There was no dropped parameter to recover, the parameter had never
+   * been written: eyeOpen, pitch and roll cannot express a glance, because a
+   * glance is not a smaller eye or a tilted head. So the eye box gets the one
+   * channel it was missing.
+   *
+   * `look` is in pixels and it moves the EYE, not the head, so the silhouette
+   * is untouched. It is added to x before rot(), which puts the offset in the
+   * head's own axes: a cat with her head tilted still looks along her own face.
+   *
+   * 2px is the 32x32 gesture scaled: the original shifts both pupils 1px on a
+   * 2px pupil (half a pupil), and hers are 4px wide at rows 16-22, so half a
+   * pupil is 2px. Applied to all three eyeOpen variants, because a channel
+   * that only works with the eyes open is a channel that will be dropped again
+   * by the first pose that asks for a glance and a blink at once. */
+  const look = o.look || 0;
   if (front) {
     const dx = H.rx * 0.40;
     for (const s of [-1, 1]) {
-      const [px, py] = rot(H.cx + s * dx, H.cy + H.ry * 0.22);
+      const [px, py] = rot(H.cx + s * dx + look, H.cy + H.ry * 0.22);
       if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.4, py - 3.0, px + 1.4, py + 3.0), INK);
       else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.4, py - 0.6, px + 1.4, py + 2.0), INK);
       else stroke(h, Gx, px - 2.2, py, px + 2.2, py, INK);
     }
   } else {
-    const [px, py] = rot(H.cx + H.rx * 0.34, H.cy + H.ry * 0.22);
+    const [px, py] = rot(H.cx + H.rx * 0.34 + look, H.cy + H.ry * 0.22);
     if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.2, py - 2.6, px + 1.2, py + 2.6), INK);
     else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.2, py - 0.4, px + 1.2, py + 1.6), INK);
     else stroke(h, Gx, px - 2.0, py, px + 2.0, py, INK);
@@ -373,7 +393,7 @@ function paintFront(p, h, Gx) {
   const hx = lying ? cx + 11 : cx - 1;
   const HRX = lying ? 16 : 19, HRY = lying ? 12 : 11;
   drawHead(h, Gx, {
-    front: true, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll,
+    front: true, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll, look: p.look,
     head: { cx: hx, cy: headY, rx: HRX, ry: HRY },
     muzzle: { cx: hx, cy: headY + HRY * 0.80, rx: lying ? 11 : 13, ry: lying ? 3 : 2.6 }
   });
@@ -466,7 +486,7 @@ function paintSide(p, h, Gx) {
   const headBase = lyingS ? { cx: 45, cy: ground - 12 } : { cx: 45, cy: 22 - lift + (p.headDY || 0) };
   h.paint(Gx, h.maskEllipse(38, headBase.cy + 8, 6.0, 6.5), WHITE, INK);
   drawHead(h, Gx, {
-    front: false, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll,
+    front: false, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll, look: p.look,
     /* measured off side_walk_0: the profile skull is x 17..28 rows 4..18, so at
      * 64 it is cx 45, cy 22, rx 11, ry 14 - not the 9.4x9.6 the redraw used */
     head: { cx: headBase.cx, cy: headBase.cy, rx: 11, ry: 14 },
@@ -498,8 +518,8 @@ function table() {
   put('idle_open', P({ posture: 'stand', eyeOpen: 1 }));
   put('idle_closed', P({ posture: 'stand', eyeOpen: 0 }));
   put('idle_blink_mid', P({ posture: 'stand', eyeOpen: 0.45 }));
-  put('idle_look_left', P({ posture: 'stand', eyeOpen: 1, headDY: 0 }));
-  put('idle_look_right', P({ posture: 'stand', eyeOpen: 1, headDY: 0 }));
+  put('idle_look_left', P({ posture: 'stand', eyeOpen: 1, headDY: 0, look: -2 }));
+  put('idle_look_right', P({ posture: 'stand', eyeOpen: 1, headDY: 0, look: 2 }));
   put('idle_breathe', P({ posture: 'stand', eyeOpen: 1, bodyY: -0.8 }));
   put('idle_breathe_closed', P({ posture: 'stand', eyeOpen: 0, bodyY: -0.8 }));
   put('idle_open_tailFlick', P({ posture: 'stand', eyeOpen: 1, tailCurl: 40, tailLift: -8 }));
