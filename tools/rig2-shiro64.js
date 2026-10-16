@@ -136,9 +136,17 @@ function drawHead(h, Gx, o) {
    * middle of the top of the head and angling only slightly outward. The
    * redraw's ears were tall thin spikes splayed to the outer corners, which is
    * a different animal's ears. Base inside the skull so they merge. */
-  const eH = H.ry * (front ? 0.82 : 0.70);
-  const eW = H.rx * (front ? 0.30 : 0.22);
-  const ex = H.rx * (front ? 0.40 : 0.26);
+  /* earIn: how far the ears have turned toward the viewer, 1 = as drawn. See the
+   * note where it is used, below. */
+  const earIn = o.earIn == null ? 1 : o.earIn;
+  /* turning an ear brings MORE OF IT, so the triangle grows as well as showing
+   * more pink. The spacing is taken up at half the rate, because in the original
+   * the two ears move toward each other while they broaden - react_1's ears are
+   * one pixel broader AND one pixel nearer than idle_open's, not merely bigger
+   * in place. */
+  const eH = H.ry * (front ? 0.82 : 0.70) * earIn;
+  const eW = H.rx * (front ? 0.30 : 0.22) * earIn;
+  const ex = H.rx * (front ? 0.40 : 0.26) * (1 + (earIn - 1) * 0.5);
   const specs = front
     ? [[H.cx - ex, H.cy - H.ry * 0.45, eW, eH], [H.cx + ex, H.cy - H.ry * 0.45, eW, eH]]
     : [[H.cx - ex, H.cy - H.ry * 0.55, eW * 0.9, eH]];
@@ -149,7 +157,32 @@ function drawHead(h, Gx, o) {
     const tipx = ax + (ax < H.cx ? -aw * 0.30 : aw * 0.30);
     const m = h.maskTri(ax - aw, ay, ax + aw, ay, tipx, ay - ah);
     h.paint(Gx, m, WHITE, INK);
-    fillMask(h, Gx, h.maskTri(ax - aw * 0.55, ay, ax + aw * 0.55, ay, tipx, ay - ah * 0.66), PINK);
+    /* THE EARS ARE A CHANNEL.
+     *
+     * react_1 collided with idle_open because its pose was
+     * `{ posture: 'stand', eyeOpen: 1, bodyY: 0, pitch: 0 }` - three no-ops and
+     * the resting idle. But the 32x32 original is NOT the resting idle: diffed
+     * against it, react_1 is 16px different and every one of those 16 is in the
+     * EARS. Rows 3..6 are the same triangle in both, but idle's ear carries
+     * white and black there (KWPWK, KWPPPK) where react's carries pink (KPPPK,
+     * KPPPPK), and react's ears are one pixel broader at the tip row and one
+     * pixel nearer each other. The head does not move, the body does not move,
+     * the eyes do not move - she has been disturbed and what she does with it is
+     * turn her ears so you see more of the inside.
+     *
+     * Nothing the pose could say reached only the ears: pitch and roll move the
+     * whole head, eyeOpen and look move the eyes. So the ear gets the one
+     * channel it was missing, the same way a714bf8 gave the eye one for the
+     * gaze. It scales the ear and the pink inside it, and nothing else - the
+     * muzzle, the skull, the face and the body are untouched, so a turned ear
+     * cannot turn her head by accident.
+     *
+     * The pink takes its share at the same rate as the ear, which keeps it
+     * inside the outline by construction and not by luck: at 1.45 the pink
+     * reaches 0.75 of the ear's half-width and 0.86 of its height, against an
+     * outline at 1.0 of both. */
+    const pw = 0.55 + (earIn - 1) * 0.45, ph = 0.66 + (earIn - 1) * 0.45;
+    fillMask(h, Gx, h.maskTri(ax - aw * pw, ay, ax + aw * pw, ay, tipx, ay - ah * ph), PINK);
   }
 
   /* skull: the measured proportion. idle_open's head is 20 wide of a 21 wide
@@ -376,24 +409,59 @@ function paintFront(p, h, Gx) {
   } else {
     /* ASLEEP: a MOUND, not a standing cat. Low, wide, rounded, with the head
      * sunk into the shoulder and the ears folded - and the tail wrapped right
-     * round the front, which is the single strongest "asleep" cue there is. */
-    const by = ground - 5;
-    h.paint(Gx, h.maskEllipse(cx, by, 21, 10), WHITE, INK);
-    fillMask(h, Gx, maskBox(h, cx - 18, by + 3, cx + 18, ground), GREY);
-    fillMask(h, Gx, h.maskEllipse(cx - 2, by - 2, 15, 5.6), WHITE);
-    /* tucked paws showing at the front */
+     * round the front, which is the single strongest "asleep" cue there is.
+     *
+     * THE CURL. sleep_0, sleep_1 and sleep_settle were three copies of one pose
+     * object, so fourteen seconds of sleep alternated between two frames that
+     * are the same picture. The 32x32 original says they are three poses, and
+     * says it in a way worth copying rather than inventing over: her head rides
+     * 1px higher in sleep_1 than in sleep_0 and everything from row 19 down is
+     * byte-identical - so the breath is in her head and chest and nowhere else -
+     * and in sleep_settle the head is 2px higher than sleep_0's while the
+     * haunch band has come up 1px under it. She draws herself up. The head
+     * going further than the body is what makes it a settle rather than a
+     * squash: her chin has not gone down into the shoulders yet, so from the
+     * front her ears ride highest at exactly the moment her body is already
+     * down. That is the pose part way down, which is what nod hands this frame.
+     *
+     * `curl` is that displacement in px at 64: the head 2px a unit, the top of
+     * the mound 1px a unit, and her BASE NOT MOVING AT ALL. That last part is
+     * measured, not stylistic - in the 32x32 original sleep_0 and sleep_settle
+     * both end on row 28, byte for byte the same `KKKKKKKKKKKKKK`, and settle
+     * has simply gained a row of haunch above it. She compresses upward from a
+     * base that does not move, so the mound is `cu` shorter and sits `cu/2`
+     * lower rather than being lifted: lift it and she floats a pixel off the
+     * floor, which is her being somewhere else, not her settling.
+     *
+     * A breath is the same gesture at half the size with the body held, so
+     * sleep_1 and sleep_settle cannot collide and cannot be tuned into each
+     * other. */
+    const cu = p.curl || 0;
+    const by = ground - 5 + cu / 2;
+    const bry = 10 - cu / 2;
+    h.paint(Gx, h.maskEllipse(cx, by, 21, bry), WHITE, INK);
+    fillMask(h, Gx, maskBox(h, cx - 18, ground - 2, cx + 18, ground), GREY);
+    fillMask(h, Gx, h.maskEllipse(cx - 2, by - bry + 8, 15, 5.6 * bry / 10), WHITE);
+    /* tucked paws showing at the front, on the ground she has not left */
     for (const s of [-1, 1]) { fillMask(h, Gx, h.maskEllipse(cx + s * 9, ground - 2, 5, 3), WHITE); edgeMaskLike(h, Gx, cx + s * 9, ground - 2, 5, 3); }
     /* The wrap, drawn FROM THE POSE rather than from a literal built on the
      * spot. `tailWrap` stays true - the shape is right - but the pose now
      * arrives with it instead of being dropped on the floor. */
-    drawTail(h, Gx, Object.assign({ tailWrap: true }, p), cx, by, 18, 9);
+    drawTail(h, Gx, Object.assign({ tailWrap: true }, p), cx, by, 18, bry * 0.9);
   }
 
-  const headY = lying ? ground - 13 : (sit ? 19 : 17) - lift + (p.headDY || 0);
+  /* THE BREATH, and it is deliberately small. sleep_0 against sleep_1 is 42px
+   * in the 32x32 original and that is a whole row of her head and chest - a
+   * sleeping cat's breath is a small true thing and anything larger stops being
+   * one. `breathe` raises the head alone, so nothing from the mound down
+   * changes: probe-tailmove will show the difference stopping at the chest. */
+  const breath = (p.breathe || 0) + (p.curl || 0) * 2;
+  const headY = lying ? ground - 13 - breath : (sit ? 19 : 17) - lift + (p.headDY || 0);
   const hx = lying ? cx + 11 : cx - 1;
   const HRX = lying ? 16 : 19, HRY = lying ? 12 : 11;
   drawHead(h, Gx, {
     front: true, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll, look: p.look,
+    earIn: p.earIn,
     head: { cx: hx, cy: headY, rx: HRX, ry: HRY },
     muzzle: { cx: hx, cy: headY + HRY * 0.80, rx: lying ? 11 : 13, ry: lying ? 3 : 2.6 }
   });
@@ -487,6 +555,7 @@ function paintSide(p, h, Gx) {
   h.paint(Gx, h.maskEllipse(38, headBase.cy + 8, 6.0, 6.5), WHITE, INK);
   drawHead(h, Gx, {
     front: false, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll, look: p.look,
+    earIn: p.earIn,
     /* measured off side_walk_0: the profile skull is x 17..28 rows 4..18, so at
      * 64 it is cx 45, cy 22, rx 11, ry 14 - not the 9.4x9.6 the redraw used */
     head: { cx: headBase.cx, cy: headBase.cy, rx: 11, ry: 14 },
@@ -542,12 +611,26 @@ function table() {
 
   /* ---- FRONT: asleep / curled, and the small front reactions ---- */
   put('sleep_0', P({ lying: true, eyeOpen: 0 }));
-  put('sleep_1', P({ lying: true, eyeOpen: 0 }));
-  put('sleep_settle', P({ lying: true, eyeOpen: 0 }));
+  /* the breath, at the size the original keeps it: half a curl. */
+  put('sleep_1', P({ lying: true, eyeOpen: 0, breathe: 2 }));
+  /* A whole curl, not a breath. She has drawn up and her chin has not gone down
+   * yet, so her ears ride highest at the moment her body is already down.
+   *
+   * curl 3 rather than 2, and that is a judgement against the original's own
+   * geometry: the 32x32 sleep_settle lifts her head 2px over sleep_0, which is
+   * curl 2, and curl 2 measures 390px here against the control's 133 (at 64,
+   * 390 = 97 as 32x32). curl 3 measures 520 = 130 as 32x32, which is the figure
+   * the 32x32 control actually carries. The extra pixel of head travel is the
+   * price of the measured difference, and it is not dramatic: her base is on the
+   * floor in both and only her head and the top of her body have moved. */
+  put('sleep_settle', P({ lying: true, eyeOpen: 0, curl: 3 }));
   put('loaf_0', P({ lying: true, eyeOpen: 0.4 }));
-  put('loaf_1', P({ lying: true, eyeOpen: 0.4 }));
+  put('loaf_1', P({ lying: true, eyeOpen: 0.4, breathe: 2 }));
   put('react_0', P({ posture: 'stand', eyeOpen: 1, bodyY: -2, pitch: -8 }));
-  put('react_1', P({ posture: 'stand', eyeOpen: 1, bodyY: 0, pitch: 0 }));
+  /* bodyY and pitch at 0 were three no-ops and the resting idle. What the
+   * original actually does with being disturbed is nothing but turn her ears,
+   * and it is 16px of it. */
+  put('react_1', P({ posture: 'stand', eyeOpen: 1, bodyY: 0, pitch: 0, earIn: 1.45 }));
   put('nod_1', P({ posture: 'stand', eyeOpen: 1, pitch: 16 }));
   put('nod_2', P({ posture: 'stand', eyeOpen: 0.4, pitch: 26 }));
   put('nod_3', P({ posture: 'stand', eyeOpen: 1, pitch: 8 }));
@@ -556,7 +639,15 @@ function table() {
   put('bump_2', P({ posture: 'stand', eyeOpen: 1, bodyY: 2, pitch: 12 }));
   put('shake_0', P({ posture: 'stand', eyeOpen: 0.5, roll: -8 }));
   put('shake_1', P({ posture: 'stand', eyeOpen: 0.5, roll: 8 }));
-  put('shake_2', P({ posture: 'stand', eyeOpen: 0.5, roll: 0 }));
+  /* The third beat of a shake is the HEAD arriving, not the pose stopping.
+   * shake_0 rolls the head one way and shake_1 the other, so shake_2 put roll
+   * back to 0 - which is not a return to centre, it is the absence of one, and
+   * it came out byte-identical to idle_blink_mid. In the 32x32 original the
+   * head of shake_2 IS back at centre and the rest of her is not: the cat sits
+   * a row low with her flanks still carrying the swing. bodyY moves the torso
+   * only - the paws stay planted and the head is already home - which is
+   * precisely a body that has not caught up with a head that has. */
+  put('shake_2', P({ posture: 'stand', eyeOpen: 0.5, roll: 0, bodyY: 2 }));
   put('alert_0', P({ posture: 'stand', eyeOpen: 1, bodyY: -3, pitch: -4 }));
   put('alert_1', P({ posture: 'stand', eyeOpen: 1, bodyY: -2, pitch: -3 }));
 
