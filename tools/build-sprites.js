@@ -10,7 +10,19 @@
  *
  *   node tools/build-sprites.js --preview   # print frames as ASCII
  *   node tools/build-sprites.js --check     # verify every frame
- *   node tools/build-sprites.js --build     # write frames.js
+ *
+ * THREE generated files, THREE modes, ONE npm script. `npm run sprites:build`
+ * runs all three in order, and that script is the only supported way to
+ * regenerate the art:
+ *
+ *   --build           writes NES-cat/js/frames.js      (32x32 cat + scene)
+ *   --rig2-frames64   writes NES-cat/js/frames64.js    (64x64 cat)
+ *   --rig2-objects64  writes NES-cat/js/objects64.js   (scene at 2x grid)
+ *
+ * All three are generated and none is to be hand-edited. The last two have
+ * no npm script of their own on purpose: an art change that regenerates only
+ * frames.js leaves the 64 set stale and still checked in, which is how
+ * 5e27603 shipped 432 lines of redraw that changed no output at all.
  *
  * Shiro is drawn FRONT-ON. That keeps her silhouette mirror-symmetric,
  * which is what lets one sprite read as "walking left" or "walking
@@ -1642,16 +1654,186 @@ function checkFrames() {
     r.bad.slice(0, 3).forEach(p => console.log('BAD ' + p));
   });
 
+  /* DISTINCT, and on the 32 group as well as the 64 one. The one allowance
+   * the duplicate rule makes is justified by the control group agreeing, so
+   * the control group has to answer to the same rule — otherwise "the control
+   * group agrees" is a comment in a source file that nothing can check. */
+  const dup = inspectDuplicates(F, null);
+  dup.bad.forEach(g => {
+    bad++;
+    console.log('BAD ' + g.length + ' frames are byte-identical — ' + g.join(' == '));
+  });
+
   const n = Object.keys(F).length;
   const ns = Object.keys(F).filter(k => k.indexOf('side_') === 0).length;
   console.log('CONNECTED  — 1 component per frame (' + specks + ' pre-existing 1-2px specks tolerated, ' +
     knownParts + ' known detachment(s) across ' + knownFrames + ' frame(s) listed in KNOWN_DETACHED)');
   console.log('DECLARED   — eye count matches the pose, per frame');
+  console.log('DISTINCT   — ' + dup.bad.length + ' unallowed identical group(s), ' + dup.allowed +
+    ' name(s) identical by KNOWN_DUPLICATE');
   console.log(bad === 0
     ? 'FRAME CHECK OK — ' + n + ' frames (front ' + (n - ns) + ' connected, ' +
       'side ' + ns + ' flip-safe), all 32x32'
     : 'FRAME CHECK FAIL — ' + bad + ' problems');
   return bad;
+}
+
+/* ---------- the 64x64 set, which had no contract at all --------------------
+ *
+ * WHY THIS BLOCK EXISTS. Four defects shipped by dumping the generated
+ * NES-cat/js/frames64.js by hand and comparing it frame by frame: twelve
+ * front-view frames identical, six walk beats holding two pictures, three look
+ * frames that were one picture, five transition frames identical. All four
+ * passed --check AND anim:check, because --check only ever looked at F and S
+ * — the 32x32 tables. NESCAT.frames64 was never loaded by any check.
+ *
+ * That is not a lesser copy. index.html loads frames64.js and scale.js does
+ * `NESCAT.frames = NESCAT.frames64`, so at ?scale=2 these 88 frames ARE the
+ * art the viewer gets. Four defects in the art everybody actually sees, and
+ * nothing in the repo capable of noticing one.
+ *
+ * WHAT IT DOES NOT DO. It does not re-render, and it does not hold an opinion
+ * about what any frame should look like. It reads the generated file off disk
+ * — the same bytes index.html loads — and asserts properties of those bytes.
+ * Authoring stays in tools/rig2-shiro64.js. This can only complain.
+ */
+
+const N64 = 64;
+
+/* Allowance list for the duplicate rule, in the same shape and the same spirit
+ * as KNOWN_DETACHED: a name, a reason, deleted the day it stops being true,
+ * counted on every run so it cannot rot away unnoticed.
+ *
+ * side_stand_0 / side_stretch_3 is the only entry because it is the ONLY
+ * identical pair in the set — measured, both sets, one group each — and it is
+ * identical in the 32x32 control group too. That control group agreeing is
+ * what makes this evidence rather than convenience: four real defects were
+ * repaired precisely by making frames stop matching each other, so a lone
+ * surviving pair that predates them and is reproduced in the other set is a
+ * decision, not a miss.
+ *
+ * The decision itself lives in shiro.js: `stretch` runs side_stretch_0..2 and
+ * never draws side_stretch_3, which was authored for the release and landed
+ * on the settled profile pose. It is a second NAME for one picture, reached by
+ * stretch_release so the turn pivots out of something finished rather than out
+ * of the half-eased stretch_2. Fixing it here would mean deleting a name
+ * shiro.js resolves by name.
+ *
+ * EVERY member of an identical group must be listed, so deleting one entry
+ * makes the next run fail — the same "the checker will tell you if you
+ * forget" property KNOWN_DETACHED has.
+ */
+const KNOWN_DUPLICATE = {
+  'side_stand_0': 'byte-identical to side_stretch_3 — the settled profile pose, given a second name by shiro.js stretch_release. The 32x32 control group is identical too.',
+  'side_stretch_3': 'byte-identical to side_stand_0 — authored for the stretch release and landed on the settled pose. The 32x32 control group is identical too.'
+};
+
+/* Byte-identical frames, grouped by name. A pure function of a WHOLE table, so
+ * it can be pointed at the shipped 64 set, at the 32 control group, or at a
+ * table assembled for the self-test — pure for the same reason inspectFrame()
+ * is, so --check-selftest pushes a broken set through the code --check runs
+ * rather than through a copy of it.
+ *
+ * The rule, and it is mechanical rather than a matter of taste: shiro.js
+ * resolves a state to a frame NAME, and the frame set is the only thing that
+ * creates motion. Two byte-identical frames are one picture with two names, so
+ * whichever one the state machine reaches second, the viewer sees nothing
+ * change. Either the second name is a deliberate alias (KNOWN_DUPLICATE) or
+ * the pose was never authored and the beat is a still frame.
+ *
+ * Returns the groups that are not allowed, and how many names the allowance
+ * list swallowed, rather than printing — same contract as inspectFrame(). */
+function inspectDuplicates(table, known) {
+  const byBytes = new Map();
+  for (const name of Object.keys(table)) {
+    const bytes = JSON.stringify(table[name]);
+    if (!byBytes.has(bytes)) byBytes.set(bytes, []);
+    byBytes.get(bytes).push(name);
+  }
+  const bad = [];
+  let allowed = 0;
+  for (const group of byBytes.values()) {
+    if (group.length < 2) continue;
+    if (group.every(n => (known || KNOWN_DUPLICATE)[n])) { allowed += group.length; continue; }
+    bad.push(group);
+  }
+  return { bad: bad, allowed: allowed };
+}
+
+/* The generated set, loaded the way the browser loads it: in its own context,
+ * so the check sees exactly the bytes that ship and never re-renders a frame
+ * to find out what it would have been. */
+function loadFrames64() {
+  const vm = require('vm');
+  const file = path.join(__dirname, '..', 'NES-cat', 'js', 'frames64.js');
+  const sandbox = {};
+  try {
+    vm.runInNewContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: 'frames64.js' });
+  } catch (e) {
+    return null;   /* absent or unparseable is a result, not a crash */
+  }
+  return (sandbox.NESCAT || {}).frames64 || null;
+}
+
+function checkFrames64() {
+  const table = loadFrames64();
+  if (!table) {
+    console.log('BAD frames64.js: NESCAT.frames64 is missing or would not parse');
+    console.log('FRAMES64 CHECK FAIL — the generated 64x64 set could not be read');
+    return 1;
+  }
+  const bad = [];
+  const have = Object.keys(table);
+
+  /* NAMED. --rig2-frames64 derives the 64 set's names from the 32 set and
+   * throws when a name has no pose, when a pose fails to draw, or when the
+   * set comes out partial. Those throws fire on the BUILD path only: a frames64.js
+   * that shipped short is read by scale.js at ?scale=2 and nothing anywhere
+   * complains. Same derivation, so this is the emitter's own name list and not
+   * a second opinion about what the frames should be. */
+  const want = Object.keys(F).filter(n => !n.startsWith('@'));
+  want.forEach(n => { if (have.indexOf(n) < 0) bad.push('frames64.js: no frame named ' + n); });
+  have.forEach(n => { if (want.indexOf(n) < 0) bad.push('frames64.js: ships a frame named ' + n + ', which frames.js does not'); });
+
+  /* SIZED and INKED — a frame that came back the wrong size, or resolved to
+   * nothing at all. Both draw as a hole in the cat, at the size the whole rest
+   * of the set is drawn at. */
+  have.forEach(n => {
+    const rows = table[n];
+    if (!Array.isArray(rows) || rows.length !== N64) {
+      bad.push('frames64.js ' + n + ': ' + (Array.isArray(rows) ? rows.length : typeof rows) +
+        ' rows, expected ' + N64);
+      return;
+    }
+    for (let y = 0; y < N64; y++) {
+      if (typeof rows[y] !== 'string' || rows[y].length !== N64) {
+        bad.push('frames64.js ' + n + ' row ' + y + ': ' +
+          (typeof rows[y] === 'string' ? rows[y].length : typeof rows[y]) + ' cols, expected ' + N64);
+        return;
+      }
+    }
+    if (rows.join('').split('.').join('') === '') bad.push('frames64.js ' + n + ': frame is empty');
+  });
+
+  /* DISTINCT — the rule that would have caught all four shipped defects. */
+  const dup = inspectDuplicates(table, null);
+  dup.bad.forEach(g => {
+    bad.push('frames64.js: ' + g.length + ' frames are byte-identical — ' + g.join(' == '));
+  });
+
+  bad.slice(0, 12).forEach(p => console.log('BAD ' + p));
+  if (bad.length > 12) console.log('BAD ... and ' + (bad.length - 12) + ' more');
+
+  const ns = have.filter(n => n.indexOf('side_') === 0).length;
+  console.log('FRAMES64   — ' + have.length + ' names, every one ' + N64 + 'x' + N64 +
+    ' and non-empty, and the same ' + want.length + ' names the 32x32 set ships');
+  console.log('DISTINCT64 — ' + dup.bad.length + ' unallowed identical group(s), ' + dup.allowed +
+    ' name(s) identical by KNOWN_DUPLICATE');
+  console.log(bad.length === 0
+    ? 'FRAMES64 CHECK OK — ' + have.length + ' frames at ' + N64 + 'x' + N64 + ', the set ?scale=2 draws (front ' +
+      (have.length - ns) + ', side ' + ns + ')'
+    : 'FRAMES64 CHECK FAIL — ' + bad.length + ' problems');
+  return bad.length;
 }
 
 /* ---------- --check-selftest -------------------------------------------
@@ -2869,6 +3051,35 @@ if (mode === '--check-selftest') {
     r.bad.slice(0, 2).forEach(b => console.log('           ' + b));
   });
 
+  /* The duplicate rule is a property of a whole SET rather than of one frame,
+   * so it cannot go through inspectFrame(). It is pure and takes a table, so
+   * it is tested the same way round: a set carrying one deliberate duplicate
+   * must be reported, and the sets that ship must not. Four defects reached
+   * master through a checker that had never been watched to fail on them. */
+  const dupCases = [
+    {
+      want: 1, label: 'a set holding two frames that are byte-identical',
+      table: { walk_a: F.side_walk_1, walk_b: F.side_walk_1 }
+    },
+    {
+      want: 1, label: 'a set holding three, reported as one group not three',
+      table: { a: F.sleep_0, b: F.sleep_0, c: F.sleep_0 }
+    },
+    {
+      want: 0, label: 'the 88 frames of the 32x32 control group',
+      table: F
+    }
+  ];
+  console.log('');
+  console.log('  the duplicate rule, which is a property of a set and not of one frame');
+  dupCases.forEach(c => {
+    const got = inspectDuplicates(c.table, null).bad.length;
+    const ok = got === c.want;
+    if (!ok) wrong++;
+    console.log('  ' + (ok ? 'ok   ' : 'WRONG') + '  want ' + c.want + ' unallowed group(s)  got ' + got +
+      '   ' + c.label);
+  });
+
   console.log('');
   let real = 0;
   Object.keys(F).forEach(k => { real += inspectFrame(k, F[k], DECLARED[k]).bad.length; });
@@ -2877,7 +3088,8 @@ if (mode === '--check-selftest') {
 
   console.log('');
   console.log(wrong === 0
-    ? 'SELFTEST OK — ' + cases.length + ' cases behave as required, real frames clean'
+    ? 'SELFTEST OK — ' + cases.length + ' frame cases, ' + dupCases.length +
+      ' duplicate cases, real frames clean'
     : 'SELFTEST FAIL — ' + wrong + ' case(s) did not behave as required');
   process.exit(wrong === 0 ? 0 : 1);
 }
@@ -2885,12 +3097,13 @@ if (mode === '--check-selftest') {
 if (mode === '--check') {
   const bad = checkFrames();
   const sbad = checkScene();
-  if (bad === 0 && sbad === 0) {
+  const b64 = checkFrames64();
+  if (bad === 0 && sbad === 0 && b64 === 0) {
     const sf = Object.values(S).reduce((n, s) => n + Object.keys(s.frames).length, 0);
     console.log('SCENE CHECK OK — ' + sf + ' object frames in ' + Object.keys(S).length +
       ' sprites, every char coloured');
   }
-  process.exit(bad === 0 && sbad === 0 ? 0 : 1);
+  process.exit(bad === 0 && sbad === 0 && b64 === 0 ? 0 : 1);
 } else if (mode === '--build') {
   const lines = [];
   lines.push('/* ============================================================');

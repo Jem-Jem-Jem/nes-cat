@@ -18,6 +18,6 @@
     "anim:check": "node tools/check-animations.js",
     "anim:soak": "node tools/check-animations.js --soak 600",
     "sprites:preview": "node tools/build-sprites.js --preview",
-    "sprites:build": "node tools/build-sprites.js --build"
+    "sprites:build": "node tools/build-sprites.js --build && node tools/build-sprites.js --rig2-frames64 && node tools/build-sprites.js --rig2-objects64"
   }
 }
