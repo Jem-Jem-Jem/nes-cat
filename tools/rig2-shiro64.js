@@ -65,23 +65,6 @@ function stroke(h, Gx, x0, y0, x1, y1, ch) {
 }
 function toes(h, Gx, x, y, spread) { for (let i = -1; i <= 1; i++) h.px(Gx, Math.round(x + i * spread), Math.round(y), PINK); }
 
-/* A ROUNDED SQUARE, not an ellipse.
- *
- * Measured off idle_open: rows 5..13 are 20, 18, 20, 20, 16, 16, 16, 14, 14 -
- * the sides hold their width for five rows before it narrows. An ellipse
- * narrows immediately from its top. That difference is most of why the redraw
- * read as a different animal: the original's head is a soft square, mine was a
- * circle. `k` is the corner radius as a fraction of the half-width. */
-function maskRoundRect(h, cx, cy, rx, ry, k) {
-  const m = h.emptyMask();
-  const r = Math.min(rx, ry) * (k == null ? 0.55 : k);
-  for (let y = 0; y < h.H; y++) for (let x = 0; x < h.W; x++) {
-    const dx = Math.abs(x + 0.5 - cx), dy = Math.abs(y + 0.5 - cy);
-    const ox = Math.max(0, dx - (rx - r)), oy = Math.max(0, dy - (ry - r));
-    if (dx <= rx && dy <= ry && ox * ox + oy * oy <= r * r) m[y][x] = true;
-  }
-  return m;
-}
 function legReach(b) { return b.femur + b.tibia + b.meta; }
 function hipFor(b, pawY, fold) { return pawY - legReach(b) * (fold == null ? 0.97 : fold); }
 
@@ -110,169 +93,188 @@ function drawLeg(h, Gx, hipX, hipY, pawX, pawY, b, ch, bend) {
   h.paint(Gx, rig2.maskChain(pts, r, h), ch, INK);
 }
 
-/* ---------- the head ----------
+/* ---------- THE HEAD: AUTHORED PIXELS ----------
  *
- * The muzzle is a SEPARATE MASS PAINTED OVER the skull, and because host.paint()
- * outlines whatever it fills, the muzzle's own top edge IS the plane break
- * between brow and muzzle. The depth is structural, not painted on.
+ * This is the correction, and it is the whole of drawHead now.
  *
- * eyeOpen: 1 open, 0.5 half, 0 closed. pitch tilts the whole head, which is
- * what makes yawn, drink and eat read instead of all looking at the viewer. */
+ * drawHead used to ASSEMBLE a head: a rounded rectangle for the skull, a
+ * triangle for each ear, an ellipse for the muzzle, and small marks placed
+ * over the top for the features. Every one of those is a rounded shape with a
+ * few numbers on it, and that is exactly why the features were barely there. No
+ * amount of tuning an ellipse produces an ear with a pink interior or an eye
+ * with face-white around it, because those are not parameters of a rounded
+ * shape - they are shapes. Measured against the 32x32 original, the redraw's
+ * profile ear was a one-pixel line three rows tall where the original has a
+ * shape six rows deep with pink in it; its eyes were ink, the same colour as
+ * the outline, in a solid block; its profile skull gave 35% of its rows to a
+ * straight side against the original's 13%, which is what "a box" means.
+ *
+ * So the head is now DRAWN. The plates below are the original's own glyphs,
+ * copied cell for cell out of NES-cat/js/frames.js - idle_open rows 2..17 and
+ * cols 6..25 for the front, side_stand_0 rows 4..16 and cols 16..28 for the
+ * profile. Nothing in them is computed. The pink is inside the front ears
+ * because the pink is in the plate. The nose is in the profile because the
+ * original's row 15 is. The brow, the cheek, the chin and the taper into the
+ * muzzle are there for the same reason.
+ *
+ * THE RIG STILL SUPPLIES THE FIVE THINGS A PLATE CANNOT KNOW, and nothing else:
+ *   - the scale, keyed off `rx`, the half-width each call site measured
+ *   - the place, `cx` and `cy`
+ *   - pitch and roll, as a rotation of the plate about that place
+ *   - eyeOpen and look, which stamp the eye into the plate
+ *   - earIn, which composites the turned-ear band over the top of it
+ *
+ * `ax`/`ay` are the plate cell that lands on (cx, cy), in plate units, chosen so
+ * that at scale 2 the plate occupies exactly the rows and columns the original
+ * occupies at 64 - the front head rows 4..35 and cols 12..51, the profile head
+ * rows 8..33 and cols 32..57 - without moving a single call site.
+ *
+ * 'E' in a plate marks the eye. It paints as the face white the eye sits in and
+ * the eye itself is stamped from EYE, because the eye is the one thing on her
+ * face that a pose must still be able to change. '.' is empty. */
+const HEAD_FRONT = [
+  '....K..........K....',
+  '...KK..........KK...',
+  '...KPK.KKKKKK.KPK...',
+  '..KWPWKWWWWWWKWPWK..',
+  '.KWPPPKWWWWWWKPPPWK.',
+  'KWPPPPPKWWWWKPPPPPWK',
+  'KKKKWWWWWWWWWWWWKKKK',
+  '..KWWWWWWWWWWWWWWK..',
+  '..KWWWEWWWWWWEWWWK..',
+  '..KWWEEWWWWWWEEWWK..',
+  '..KWWEEWWWWWWEEWWK..',
+  '...BBHHHHHHHHHHBB...',
+  '...KKHHHHNNHHHHKK...',
+  '.....KKHMHHMHKK.....',
+  '.......KKMMKK.......',
+  '......KKKKKKKK......'
+];
+/* the TURNED ear, and this is the whole of what a disturbance does to her:
+ * react_1's head against idle_open's is 16px different and every one of those
+ * 16 is in rows 1..7 - the ears. They stand a row taller, sit a pixel nearer
+ * each other and carry far more pink. react_1 rows 1..7, cols 6..25, which is
+ * HEAD_FRONT's rows 0..5 with one row added above, so it is composited over
+ * the plate opaquely rather than laid on top of the resting ears. */
+const HEAD_FRONT_EARS_TURNED = [
+  '....K..........K....',
+  '....K..........K....',
+  '...KPK........KPK...',
+  '..KWPK.KKKKKK.KPWK..',
+  '..KPPPKWWWWWWKPPPK..',
+  '.KPPPPKWWWWWWKPPPPK.',
+  'KWPPPPPKWWWWKPPPPPWK'
+];
+/* the profile head: side_stand_0 rows 4..16, cols 16..28. The ear is the shape
+ * at rows 0..5 with pink at rows 3..4, the brow comes in over the eye at row 8,
+ * the eye is a two-wide three-tall blob, the muzzle is the pale H band at rows
+ * 11..12 with the pink N nose at its front corner and the M mouth under it, and
+ * the row widths run 1,2,3,4,10,10,11,11,11,13,12,12,12 - it tapers, because a
+ * cat's head is not a rounded rectangle. */
+const HEAD_SIDE = [
+  'K............',
+  '.K.........K.',
+  '.KK........K.',
+  '.KWKK.....KK.',
+  '.KWPKKKKKKPK.',
+  '..KKWWWWWKKK.',
+  '.KWWWWWWWWWK.',
+  '.KWWWWWWWWWK.',
+  '.KWWWWWEWWWK.',
+  'KWWWWWEEWWWWK',
+  '.KWWWWEEWWWWK',
+  '.KHHHHHHHHHNK',
+  'KKHHHHHHHHMK.'
+];
+const PLATE = {
+  front: { rows: HEAD_FRONT, ax: 9.5, ay: 6.5, skullRx: 9.5 },
+  side: { rows: HEAD_SIDE, ax: 6.5, ay: 7.0, skullRx: 5.5 }
+};
+
+/* THE EYE, authored per state, because the original's eye is three different
+ * shapes rather than one shape at three sizes. Open is a 2x3 with a ONE-PIXEL
+ * LID LINE across the top, and on her right eye that line sits at the inner
+ * edge of the eye and on her left at the outer one - idle_open row 10 has E at
+ * plate cols 6 and 13 over a 5..6 and 13..14 eye, and the stamp keeps that
+ * asymmetry rather than mirroring it into symmetry she was never drawn with.
+ * Shut is a 3-wide bar on the open eye's bottom row and a pixel wider on each
+ * side (idle_closed row 12). `half` is the one shape here that is authored
+ * rather than measured: idle_blink_mid is a 3px chevron, and at 64 that is 12
+ * scattered single pixels, which reads as noise rather than as an eye halfway
+ * shut. A 2x2 at the bottom of the open eye is the same gesture, at the size we
+ * are drawing. */
+const EYE_FRONT = {
+  open: [[5, 8, ['.E', 'EE', 'EE']], [13, 8, ['E.', 'EE', 'EE']]],
+  half: [[5, 9, ['EE', 'EE']], [13, 9, ['EE', 'EE']]],
+  closed: [[5, 10, ['EEE']], [12, 10, ['EEE']]]
+};
+const EYE_SIDE = {
+  open: [[6, 8, ['.E', 'EE', 'EE']]],
+  half: [[6, 9, ['EE', 'EE']]],
+  closed: [[7, 9, ['EEE']]]
+};
+
 function drawHead(h, Gx, o) {
-  const front = !!o.front;
-  const H = o.head, M = o.muzzle;
+  const front = !!o.front, H = o.head;
   const pitch = o.pitch || 0, roll = o.roll || 0;
+  const look = o.look || 0;
+  const open = o.eyeOpen == null ? 1 : o.eyeOpen;
+  const earIn = o.earIn == null ? 1 : o.earIn;
+
+  const pl = front ? PLATE.front : PLATE.side;
+  const PW = pl.rows[0].length;
+  /* the turned-ear band, composited over the plate opaquely: an ear that has
+   * turned is a different ear, not a bigger one drawn on top of the resting
+   * one, and the resting outline must go with it. */
+  const band = front && earIn > 1.2 ? HEAD_FRONT_EARS_TURNED : null;
+  const shift = band ? 1 : 0;
+  const src = band ? [band[0]].concat(pl.rows) : pl.rows;
+  if (band) for (let j = 1; j < band.length; j++) src[j] = band[j];
+
+  /* THE SCALE, from the rig. `rx` is the half-width the call site measured and
+   * the plate's skull half-width is what it is compared against: rx 19 over the
+   * front plate's 9.5 asks for exactly 2 - the original, drawn on the bigger
+   * grid - and the lying head's rx 16 asks for 1.68, so the head on the mound
+   * is smaller without anybody drawing it twice. */
+  const k = H.rx / pl.skullRx;
+
   const rad = d => d * Math.PI / 180;
   const ca = Math.cos(rad(pitch)), sa = Math.sin(rad(pitch));
   const cb = Math.cos(rad(roll)), sb = Math.sin(rad(roll));
-  const rot = (x, y) => {
-    let dx = x - H.cx, dy = y - H.cy;
-    const rx = dx * cb - dy * sb, ry = dx * sb + dy * cb;
-    return [H.cx + (rx * ca - ry * sa), H.cy + (rx * sa + ry * ca)];
-  };
 
-  /* EARS: the ORIGINAL's ears. Measured off idle_open rows 2..8 - SHORT and
-   * BLUNT (4 rows tall at 32, so 8 at 64), sitting CLOSE TOGETHER near the
-   * middle of the top of the head and angling only slightly outward. The
-   * redraw's ears were tall thin spikes splayed to the outer corners, which is
-   * a different animal's ears. Base inside the skull so they merge. */
-  /* earIn: how far the ears have turned toward the viewer, 1 = as drawn. See the
-   * note where it is used, below. */
-  const earIn = o.earIn == null ? 1 : o.earIn;
-  /* turning an ear brings MORE OF IT, so the triangle grows as well as showing
-   * more pink. The spacing is taken up at half the rate, because in the original
-   * the two ears move toward each other while they broaden - react_1's ears are
-   * one pixel broader AND one pixel nearer than idle_open's, not merely bigger
-   * in place. */
-  const eH = H.ry * (front ? 0.82 : 0.70) * earIn;
-  const eW = H.rx * (front ? 0.30 : 0.22) * earIn;
-  const ex = H.rx * (front ? 0.40 : 0.26) * (1 + (earIn - 1) * 0.5);
-  const specs = front
-    ? [[H.cx - ex, H.cy - H.ry * 0.45, eW, eH], [H.cx + ex, H.cy - H.ry * 0.45, eW, eH]]
-    : [[H.cx - ex, H.cy - H.ry * 0.55, eW * 0.9, eH]];
-  for (const [ax, ay, aw, ah] of specs) {
-    /* base INSIDE the skull so the ear merges with it. The first attempt put
-     * the base ON the skull's top edge, which left them floating above her head
-     * as detached pink flecks. */
-    const tipx = ax + (ax < H.cx ? -aw * 0.30 : aw * 0.30);
-    const m = h.maskTri(ax - aw, ay, ax + aw, ay, tipx, ay - ah);
-    h.paint(Gx, m, WHITE, INK);
-    /* THE EARS ARE A CHANNEL.
-     *
-     * react_1 collided with idle_open because its pose was
-     * `{ posture: 'stand', eyeOpen: 1, bodyY: 0, pitch: 0 }` - three no-ops and
-     * the resting idle. But the 32x32 original is NOT the resting idle: diffed
-     * against it, react_1 is 16px different and every one of those 16 is in the
-     * EARS. Rows 3..6 are the same triangle in both, but idle's ear carries
-     * white and black there (KWPWK, KWPPPK) where react's carries pink (KPPPK,
-     * KPPPPK), and react's ears are one pixel broader at the tip row and one
-     * pixel nearer each other. The head does not move, the body does not move,
-     * the eyes do not move - she has been disturbed and what she does with it is
-     * turn her ears so you see more of the inside.
-     *
-     * Nothing the pose could say reached only the ears: pitch and roll move the
-     * whole head, eyeOpen and look move the eyes. So the ear gets the one
-     * channel it was missing, the same way a714bf8 gave the eye one for the
-     * gaze. It scales the ear and the pink inside it, and nothing else - the
-     * muzzle, the skull, the face and the body are untouched, so a turned ear
-     * cannot turn her head by accident.
-     *
-     * The pink takes its share at the same rate as the ear, which keeps it
-     * inside the outline by construction and not by luck: at 1.45 the pink
-     * reaches 0.75 of the ear's half-width and 0.86 of its height, against an
-     * outline at 1.0 of both. */
-    const pw = 0.55 + (earIn - 1) * 0.45, ph = 0.66 + (earIn - 1) * 0.45;
-    fillMask(h, Gx, h.maskTri(ax - aw * pw, ay, ax + aw * pw, ay, tipx, ay - ah * ph), PINK);
+  /* THE GAZE, unchanged in meaning: `look` is in 64-grid pixels and it moves
+   * the EYE, not the head, so the silhouette is untouched. 2px is the 32x32
+   * gesture scaled - the original shifts both pupils 1px on a 2px pupil and
+   * hers are 4px wide at 64, so half a pupil is 2px. It is converted to plate
+   * cells and applied to the stamp, so it works on all three eyeOpen variants
+   * at once: a channel that only works with the eyes open is a channel that
+   * gets dropped again by the first pose that asks for a glance and a blink. */
+  const eye = (front ? EYE_FRONT : EYE_SIDE)[open > 0.55 ? 'open' : (open > 0.2 ? 'half' : 'closed')];
+  const eyeCells = new Set();
+  for (const [c, r, g] of eye) {
+    const c0 = c + Math.round(look / k);
+    for (let j = 0; j < g.length; j++)
+      for (let i = 0; i < g[j].length; i++)
+        if (g[j][i] === 'E') eyeCells.add((r + j) * PW + (c0 + i));
   }
 
-  /* skull: the measured proportion. idle_open's head is 20 wide of a 21 wide
-   * figure and 14 tall, so rx is NEARLY HALF the figure width. The earlier
-   * pass used rx 12.5 at 64 - 37% too small - which is most of why the redraw
-   * did not read as her. */
-  h.paint(Gx, maskRoundRect(h, H.cx, H.cy, H.rx, H.ry, front ? 0.50 : 0.55), WHITE, INK);
-
-  /* NO brow band. Row 8 of the original reads KKKKWWWWWWWWWWWWKKKK - black at
-   * the EDGES only, which is the skull's own outline and not a bar. Painting a
-   * solid one across the middle of her face put a black stripe on her like a
-   * hat brim. The outline above already draws it correctly. */
-
-  /* cheeks: the original puts them LOW and near the middle - row 15, either
-   * side of the nose - not on the outer edge of the face as the redraw did. */
-  const cheekY = H.cy + H.ry * 0.62;
-  if (front) {
-    fillMask(h, Gx, h.maskEllipse(H.cx - H.rx * 0.30, cheekY, 1.9, 1.4), PINK);
-    fillMask(h, Gx, h.maskEllipse(H.cx + H.rx * 0.30, cheekY, 1.9, 1.4), PINK);
-  } else {
-    fillMask(h, Gx, h.maskEllipse(H.cx - H.rx * 0.10, H.cy + H.ry * 0.52, 1.8, 1.3), PINK);
+  /* One pass, inverse-mapped: every grid pixel asks the plate which authored
+   * cell it came from, after undoing roll then pitch about (cx, cy). Sampling
+   * the plate rather than drawing into it is what keeps a 30 degree pitch from
+   * leaving half the head behind at the old angle. */
+  for (let y = 0; y < h.H; y++) for (let x = 0; x < h.W; x++) {
+    const ux = x + 0.5 - H.cx, uy = y + 0.5 - H.cy;
+    const lu = ux * cb + uy * sb, lv = -ux * sb + uy * cb;
+    const lx = lu * ca + lv * sa, ly = -lu * sa + lv * ca;
+    const sx = Math.floor(lx / k + pl.ax), sy = Math.floor(ly / k + pl.ay);
+    const row = src[sy + shift];
+    if (!row || sx < 0 || sx >= PW) continue;
+    const ch = row[sx];
+    if (ch === undefined || ch === '.') continue;
+    if (eyeCells.has(sy * PW + sx)) Gx[y][x] = 'E';
+    else if (ch === 'E') Gx[y][x] = WHITE;     /* the sclera the eye sits in */
+    else Gx[y][x] = ch;
   }
-
-  /* THE MUZZLE. Painted over the skull so its own outline is the brow/muzzle
-   * plane break. In PROFILE it is the light grey #ced4da, not white - the
-   * original's muzzle is a distinctly paler grey than her body, and drawing it
-   * white is what made the profile read as a beak. */
-  /* THE MUZZLE. The original's front muzzle is a flat light band LOW on the face
-   * (idle_open row 13, x 9..22), and its profile muzzle is a small light-grey
-   * wedge at the front (side_walk_0 rows 15..17). It is NOT a raised blob.
-   *
-   * The redraw painted a big ellipse over the skull, and because host.paint()
-   * outlines whatever it fills, that outline became a dark ring sitting on her
-   * chest like a bowtie - the single most obviously wrong thing in the first
-   * side-by-side. So: no outline on the muzzle, and it stays INSIDE the head. */
-  const [mx, my] = rot(M.cx, M.cy);
-  const muz = h.maskEllipse(mx, my, M.rx, M.ry);
-  fillMask(h, Gx, muz, front ? WHITE : MUEZZLE);
-  if (!front) fillMask(h, Gx, maskBox(h, mx - M.rx * 0.7, my - M.ry, mx + M.rx * 0.7, my + M.ry), MUEZZLE);
-  /* the chin: a small grey under the nose, which is all the original has */
-  fillMask(h, Gx, maskBox(h, mx - M.rx * 0.42, my + M.ry * 0.30, mx + M.rx * 0.42, my + M.ry * 1.1), GREY);
-
-  /* eyes: LOW and WIDE apart, which is the original's whole expression.
-   * Two columns three rows tall. */
-  /* EYES: measured off idle_open rows 10..12 - E at x10..11 and x19..20, two
-   * columns THREE pixels tall, low on the face (rows 10-12 of a 2..15 head) and
-   * 8 columns apart. The redraw's were wide rectangles twice the size, set far
-   * apart at mid-face. */
-  const open = o.eyeOpen == null ? 1 : o.eyeOpen;
-  /* THE GAZE. She moves her eyes; she does not turn her head.
-   *
-   * idle_look_left and idle_look_right were declared as two IDENTICAL pose
-   * objects - same posture, same eyeOpen, same headDY - so the renderer
-   * faithfully drew the same cat twice and three shipped names came out as one
-   * picture. There was no dropped parameter to recover, the parameter had never
-   * been written: eyeOpen, pitch and roll cannot express a glance, because a
-   * glance is not a smaller eye or a tilted head. So the eye box gets the one
-   * channel it was missing.
-   *
-   * `look` is in pixels and it moves the EYE, not the head, so the silhouette
-   * is untouched. It is added to x before rot(), which puts the offset in the
-   * head's own axes: a cat with her head tilted still looks along her own face.
-   *
-   * 2px is the 32x32 gesture scaled: the original shifts both pupils 1px on a
-   * 2px pupil (half a pupil), and hers are 4px wide at rows 16-22, so half a
-   * pupil is 2px. Applied to all three eyeOpen variants, because a channel
-   * that only works with the eyes open is a channel that will be dropped again
-   * by the first pose that asks for a glance and a blink at once. */
-  const look = o.look || 0;
-  if (front) {
-    const dx = H.rx * 0.40;
-    for (const s of [-1, 1]) {
-      const [px, py] = rot(H.cx + s * dx + look, H.cy + H.ry * 0.22);
-      if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.4, py - 3.0, px + 1.4, py + 3.0), INK);
-      else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.4, py - 0.6, px + 1.4, py + 2.0), INK);
-      else stroke(h, Gx, px - 2.2, py, px + 2.2, py, INK);
-    }
-  } else {
-    const [px, py] = rot(H.cx + H.rx * 0.34 + look, H.cy + H.ry * 0.22);
-    if (open > 0.55) fillMask(h, Gx, maskBox(h, px - 1.2, py - 2.6, px + 1.2, py + 2.6), INK);
-    else if (open > 0.2) fillMask(h, Gx, maskBox(h, px - 1.2, py - 0.4, px + 1.2, py + 1.6), INK);
-    else stroke(h, Gx, px - 2.0, py, px + 2.0, py, INK);
-  }
-
-  /* the nose, small, on the front of the muzzle */
-  const [nx, ny] = rot(front ? M.cx : M.cx + M.rx * 0.34, M.cy - M.ry * 0.30);
-  const nw = front ? 2.0 : 1.5, nh = front ? 1.2 : 1.0;
-  fillMask(h, Gx, h.maskTri(nx - nw, ny - nh, nx + nw, ny - nh, nx, ny + nh + 0.3), NOSE);
-  /* the mouth: a dark line under it, which is all the original has */
-  stroke(h, Gx, nx - (front ? 1.6 : 1.2), ny + nh + 0.9, nx + (front ? 1.6 : 1.2), ny + nh + 0.9, DARK);
 }
 
 /* ---------- the tail ----------
@@ -462,8 +464,7 @@ function paintFront(p, h, Gx) {
   drawHead(h, Gx, {
     front: true, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll, look: p.look,
     earIn: p.earIn,
-    head: { cx: hx, cy: headY, rx: HRX, ry: HRY },
-    muzzle: { cx: hx, cy: headY + HRY * 0.80, rx: lying ? 11 : 13, ry: lying ? 3 : 2.6 }
+    head: { cx: hx, cy: headY, rx: HRX, ry: HRY }
   });
 }
 function edgeMaskLike(h, Gx, cx, cy, rx, ry) {
@@ -550,17 +551,24 @@ function paintSide(p, h, Gx) {
   }
 
   /* neck, then head. Pitched down for eat and drink so she is looking at the
-   * bowl rather than at the viewer. */
+   * bowl rather than at the viewer.
+   *
+   * `muzzleUp` is gone from this call and from what it fed. It used to raise the
+   * muzzle 1..4px INSIDE a head that did not move, which is how eat and drink
+   * were made to read before the head could be pitched at all. The muzzle is
+   * part of the head now, so there is nothing to raise independently of it: the
+   * whole plate turns with `pitch`, and side_eat_0 at pitch 26 does what it did
+   * before. The pose table still carries the field on five frames and nothing
+   * reads it; that is flagged, not silently left to look load-bearing. */
   const headBase = lyingS ? { cx: 45, cy: ground - 12 } : { cx: 45, cy: 22 - lift + (p.headDY || 0) };
   h.paint(Gx, h.maskEllipse(38, headBase.cy + 8, 6.0, 6.5), WHITE, INK);
   drawHead(h, Gx, {
     front: false, eyeOpen: p.eyeOpen, pitch: p.pitch, roll: p.roll, look: p.look,
     earIn: p.earIn,
     /* measured off side_walk_0: the profile skull is x 17..28 rows 4..18, so at
-     * 64 it is cx 45, cy 22, rx 11, ry 14 - not the 9.4x9.6 the redraw used */
-    head: { cx: headBase.cx, cy: headBase.cy, rx: 11, ry: 14 },
-    muzzle: { cx: headBase.cx + 1, cy: headBase.cy + 10.5 - (p.muzzleUp || 0), rx: 7, ry: 2.6 },
-    earDx: -4.8, earDy: -7.5
+     * 64 it is cx 45, cy 22, rx 11 - and `rx` is now the plate's scale key, not
+     * an ellipse's half-width */
+    head: { cx: headBase.cx, cy: headBase.cy, rx: 11, ry: 14 }
   });
 }
 
