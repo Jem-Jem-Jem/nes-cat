@@ -1732,10 +1732,22 @@
 
     /* ---------- at the fixtures ---------- */
 
+    /* eat, drink, tree and scratch each cross the room to reach their fixture,
+     * and all four used to perform on the way: measured 2.4s of chewing across
+     * 108px on the way to the food bowl, 2.8s of lapping across 128px on the way
+     * to the water one. They walk there now, on walk's own stride rule — its
+     * origin is beginActivity's _walkStartX, which is stashed for any activity
+     * with a target, so the step count starts where she set off from rather than
+     * wherever the last walk left it. The performance below is untouched: phase
+     * 1 starts it, from the same reset it always started from. */
     eat: function (t) {
+      if (this._act.phase === 0) return stride(false).call(this);
       return Shiro.Pose.cyc(['side_eat_0', 'side_eat_1', 'side_eat_2', 'side_eat_1'], 0.25, 3.2, t);
     },
-    drink: function (t) { return Shiro.Pose.cyc(['side_drink_0', 'side_drink_1'], 0.2, 3.0, t); },
+    drink: function (t) {
+      if (this._act.phase === 0) return stride(false).call(this);
+      return Shiro.Pose.cyc(['side_drink_0', 'side_drink_1'], 0.2, 3.0, t);
+    },
     groom: function (t) { return sway(2.2, 'side_groom_0', 'side_groom_1', t); },
     wash: function (t) { return sway(2.6, 'side_wash_0', 'side_wash_1', t); },
 
@@ -1750,6 +1762,7 @@
      * three ways evenly — each frame gets exactly a third of the period, and
      * the extremes stop being the only two things anybody sees. */
     tree: function (t) {
+      if (this._act.phase === 0) return stride(false).call(this);
       var tb = Math.sin(t * 1.9);
       if (tb > 0.5) return 'side_tree_1';
       if (tb < -0.5) return 'side_tree_0';
@@ -1757,9 +1770,14 @@
     },
 
     /* three frames rather than two: at raking speed a two-frame loop is a
-     * flicker, and the third frame is the weight going the other way */
+     * flicker, and the third frame is the weight going the other way
+     *
+     * The approach used to be ONE frame of it — side_walk_4 for all 82 ticks,
+     * 62px of travel on a single frozen stride, which is a paw skate and the
+     * exact thing the distance-stepped cycle above exists to prevent. It is
+     * walk's cycle now, so the paws go under her as she closes on the post. */
     scratch: function (t) {
-      if (this._act.phase === 0) return 'side_walk_4';
+      if (this._act.phase === 0) return stride(false).call(this);
       return Shiro.Pose.cyc(['side_scratch_0', 'side_scratch_1', 'side_scratch_2'], 0.12, 5.5, t);
     },
 
