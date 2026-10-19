@@ -14,6 +14,41 @@
 
   var sceneGfx = null;
 
+  /* THE OFFSCREEN BUFFER, AND WHY IT HAS TO BE A FUNCTION.
+   *
+   * This is the thing that is actually 320x180 or 640x360. The visible canvas
+   * is the window and is always window-sized; the room is composited into this
+   * buffer and blitted out of it. It was created once inside setup() from
+   * CFG.LOGICAL_W, which made it the one piece of the room that could not
+   * follow a size change — switch from 2x to 1x and every number in the piece
+   * would come back to 320-space while a 640x360 buffer stayed there to be
+   * drawn into, so the toggle would change what was true and not what was
+   * drawn.
+   *
+   * remove() before replacing: each createGraphics makes a real canvas element,
+   * and a toggle pressed a few dozen times would otherwise leave one attached
+   * to nothing per press. */
+  function makeSceneGfx() {
+    if (sceneGfx) sceneGfx.remove();
+    sceneGfx = createGraphics(CFG.LOGICAL_W, CFG.LOGICAL_H);
+    sceneGfx.pixelDensity(1);
+    sceneGfx.noSmooth();
+    NESCAT.viewport.w = sceneGfx.width;
+    NESCAT.viewport.h = sceneGfx.height;
+  }
+
+  /* Published so the buffer can be measured from outside rather than asserted.
+   * w/h are what createGraphics actually produced; resize() is the hook
+   * scale.js calls once it has finished swapping the geometry. */
+  NESCAT.viewport = {
+    w: 0,
+    h: 0,
+    resize: function () {
+      makeSceneGfx();
+      recomputeLayout();
+    }
+  };
+
   var layout = {
     scale: 1,
     ox: 0,
@@ -76,10 +111,7 @@
     pixelDensity(1);
     noSmooth();
 
-    sceneGfx = createGraphics(CFG.LOGICAL_W, CFG.LOGICAL_H);
-    sceneGfx.pixelDensity(1);
-    sceneGfx.noSmooth();
-
+    makeSceneGfx();
     recomputeLayout();
 
     /* order matters: room geometry, then the cat, then its inputs + shell */

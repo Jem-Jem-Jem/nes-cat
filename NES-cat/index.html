@@ -17,6 +17,19 @@
          which is the markup that used to be hand-written below. -->
     <div id="root"></div>
 
+    <!-- THE SIZE TOGGLE. A SIBLING of #root, deliberately, and not a
+         descendant. ReactDOM.createRoot() owns #root and its subtree and
+         nothing else, so a sibling is invisible to React in both directions:
+         React will not render it or reconcile it away, and it reads nothing
+         from the shell. The two can move independently while the migration
+         runs. Inside the tree it could only have been a leaf that owns
+         nothing, and its label would have had to go through the store, which
+         is the text ownership App.js reserves for later. It is wired by
+         scale.js (see setScale there), which is also what keeps the label,
+         the URL and the pixels from disagreeing. -->
+    <button id="scale-toggle" class="scale-toggle" type="button"
+            aria-pressed="false" title="switch between 320x180 and 640x360">320x180</button>
+
     <!-- React, the piece, and then p5 — and the ORDER IS THE CONTRACT.
          React mounts synchronously (see js/react/mount.js) so that #stage
          exists before p5 boots. p5 in global mode calls window.setup as soon

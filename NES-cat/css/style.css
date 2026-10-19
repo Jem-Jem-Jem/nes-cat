@@ -209,6 +209,60 @@ body {
     line-height: 1.8;
 }
 
+/* ---------------- dev size toggle ---------------- */
+
+/* The one piece of chrome that is neither the room nor the shell.
+ *
+ * Top right, above everything including the gate (z-index 20), because a
+ * developer comparing the two sizes needs it before PRESS START as much as
+ * after — and after, the gate's box is dead centre and the sound button is
+ * bottom left, so this corner is the only one free.
+ *
+ * Sized and placed to clear the dialogue box rather than to look balanced
+ * beside the title: the box is anchored at the TOP of the playfield and is up
+ * to 60 css px tall, starting at 34px in 320-space and at 26px under the
+ * compact query. This button ends at 30px, above both.
+ *
+ * That leaves it over bare wall. At 320-space the window ends at x 96, the cat
+ * tree at 240 and the dangling toy at 233; past x 250 in the top 30 rows there
+ * is nothing, at either scale, because the whole scene is drawn inside a
+ * transform that maps the same 320-space literals.
+ *
+ * NES.css styles `.nes-btn`, not a bare button, so it is styled here rather
+ * than by borrowing a class that the HUD's specificity rules would fight. */
+.scale-toggle {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 30;              /* over the gate (20) and the HUD (5) */
+    min-width: 84px;          /* the label changes; the box must not jitter */
+    padding: 6px 8px;
+    font-family: 'Press Start 2P', cursive;
+    font-size: 8px;
+    line-height: 1;
+    color: #fff;
+    background: #212529;
+    border: 2px solid #adb5bd;
+    cursor: pointer;
+}
+
+.scale-toggle:hover {
+    border-color: #209cee;
+}
+
+.scale-toggle:focus-visible {
+    outline: 2px solid #209cee;
+    outline-offset: 2px;
+}
+
+/* Its own layer rather than a child of #hud, which is pointer-events:none and
+ * sized to the playfield. The button has to take clicks; nothing else here
+ * does. */
+.scale-toggle[aria-pressed="true"] {
+    border-color: #209cee;
+    color: #209cee;
+}
+
 /* ---------------- mobile: compact overlay ---------------- */
 
 @media (max-width: 720px), (max-height: 520px) {
